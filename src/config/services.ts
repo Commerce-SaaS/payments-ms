@@ -1,0 +1,2 @@
+export const RMQ_SERVICE = 'RMQ_SERVICE';
+export const STRIPE_CLIENT = 'STRIPE_CLIENT'
