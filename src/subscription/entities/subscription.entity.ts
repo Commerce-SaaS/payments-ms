@@ -10,13 +10,13 @@ import { SubscriptionPlan } from '../enums/subscription-plan.enum';
 import { SubscriptionStatus } from '../enums/subscription-status.enum';
 
 @Entity()
-@Index(['organizationId'], { unique: true })
+@Index(['userId'], { unique: true })
 export class Subscription {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column()
-  organizationId: string;
+  userId: string;
 
   @Column({
     type: 'enum',
@@ -39,6 +39,18 @@ export class Subscription {
 
   @Column({ type: 'timestamp', nullable: true })
   currentPeriodEnd?: Date;
+
+  @Column({ type: 'boolean', default: false })
+  cancelAtPeriodEnd: boolean;
+
+  @Column({ type: 'int', nullable: true })
+  priceAmount?: number;
+
+  @Column({ nullable: true })
+  currency?: string;
+
+  @Column({ nullable: true })
+  stripePriceId?: string;
 
   @CreateDateColumn()
   createdAt: Date;

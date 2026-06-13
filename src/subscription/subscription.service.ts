@@ -11,7 +11,7 @@ import { RpcExceptionHelper } from 'src/common/helpers/rpc-exception.helper';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { PaymentType } from 'src/payment/enums/payment-type.enum';
 import { envs } from 'src/config';
-import { CreateSubscriptionSessionDto } from 'src/payment/dto/create-subscription-session.dto';
+import { CreateOnboardingSubscriptionSessionDto } from './dto/create-onboarding-subscription-session.dto';
 import { PaymentService } from 'src/payment/payment.service';
 import { PaymentProviderFactory } from 'src/providers/payment-provider.factory';
 
@@ -25,45 +25,32 @@ export class SubscriptionService {
     private readonly providerFactory: PaymentProviderFactory,
   ) {}
 
-  async createTrial(organizationId: string): Promise<Subscription> {
-    const existing = await this.subscriptionRepository.findOneBy({
-      organizationId,
-    });
+  async createOnboardingSubscriptionSession(
+    dto: CreateOnboardingSubscriptionSessionDto,
+  ) {
+    const { userId, priceId, provider } = dto;
 
-    if (existing) {
-      RpcExceptionHelper.duplicate(
-        SubscriptionErrorCode.SUBSCRIPTION_ALREADY_EXISTS,
-        'Subscription',
+    let subscription = await this.subscriptionRepository.findOneBy({ userId });
+
+    if (!subscription) {
+      subscription = await this.subscriptionRepository.save(
+        this.subscriptionRepository.create({
+          userId,
+          plan: SubscriptionPlan.BASIC,
+          status: SubscriptionStatus.PROCESSING,
+        }),
       );
     }
 
-    try {
-      const start = new Date();
-      const end = new Date();
-      end.setDate(end.getDate() + 14);
-
-      const subscription = this.subscriptionRepository.create({
-        organizationId,
-        plan: SubscriptionPlan.FREE,
-        status: SubscriptionStatus.TRIAL,
-        currentPeriodStart: start,
-        currentPeriodEnd: end,
-      });
-
-      return await this.subscriptionRepository.save(subscription);
-    } catch (error) {
-      RpcExceptionHelper.internal(
-        SubscriptionErrorCode.SUBSCRIPTION_CREATE_FAILED,
-        'Failed to create trial subscription',
-      );
+    if (this.isPaid(subscription)) {
+      return {
+        subscriptionId: subscription.id,
+        alreadyActive: true,
+      };
     }
-  }
-
-  async createSubscriptionSession(dto: CreateSubscriptionSessionDto) {
-    const { organizationId, priceId, subscriptionId, userId, provider } = dto;
 
     const existingPayment = await this.paymentService.getPendingPayment(
-      { subscriptionId },
+      { subscriptionId: subscription.id },
       provider,
     );
 
@@ -73,6 +60,7 @@ export class SubscriptionService {
         checkoutUrl: existingPayment.checkoutUrl,
       };
     }
+
     const providerStrategy = this.providerFactory.get(provider);
     const priceData = await providerStrategy.retrievePrice(priceId);
 
@@ -84,8 +72,7 @@ export class SubscriptionService {
     }
 
     const payment = await this.paymentService.create({
-      organizationId,
-      subscriptionId,
+      subscriptionId: subscription.id,
       provider,
       userId,
       amount: priceData.unitAmount,
@@ -98,16 +85,17 @@ export class SubscriptionService {
       successUrl: `${envs.clientUrl}/success`,
       cancelUrl: `${envs.clientUrl}/cancel`,
       metadata: {
-        subscriptionId,
+        subscriptionId: subscription.id,
         productId: priceData.productId,
         productName: priceData.productName,
         paymentId: payment.id,
-        organizationId,
+        userId,
         type: PaymentType.SUBSCRIPTION,
       },
     });
 
-    await this.paymentService.update(payment.id, {
+    await this.paymentService.update({
+      paymentId: payment.id,
       externalPaymentId: session.externalPaymentId ?? '',
       externalSessionId: session.externalSessionId ?? '',
       checkoutUrl: session.checkoutUrl,
@@ -135,9 +123,9 @@ export class SubscriptionService {
     return await this.subscriptionRepository.save(subscription);
   }
 
-  async getByOrganization(orgId: string): Promise<Subscription> {
+  async getByUser(userId: string): Promise<Subscription> {
     const subscription = await this.subscriptionRepository.findOneBy({
-      organizationId: orgId,
+      userId,
     });
 
     if (!subscription) {
@@ -150,9 +138,32 @@ export class SubscriptionService {
     return subscription;
   }
 
+  async getMyHistory(userId: string): Promise<Subscription[]> {
+    return await this.subscriptionRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async findOne(id: string) {
     const subscription = await this.subscriptionRepository.findOneBy({
-      id
+      id,
+    });
+
+    if (!subscription) {
+      RpcExceptionHelper.notFound(
+        SubscriptionErrorCode.SUBSCRIPTION_NOT_FOUND,
+        'Subscription',
+      );
+    }
+
+    return subscription;
+  }
+
+  async getMyById(id: string, userId: string): Promise<Subscription> {
+    const subscription = await this.subscriptionRepository.findOneBy({
+      id,
+      userId,
     });
 
     if (!subscription) {
@@ -206,7 +217,18 @@ export class SubscriptionService {
     return (
       [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL].includes(
         subscription.status,
-      ) && subscription.currentPeriodEnd != null && subscription.currentPeriodEnd > now
+      ) &&
+      subscription.currentPeriodEnd != null &&
+      subscription.currentPeriodEnd > now
+    );
+  }
+
+  isPaid(subscription: Subscription): boolean {
+    const now = new Date();
+    return (
+      subscription.status === SubscriptionStatus.ACTIVE &&
+      subscription.currentPeriodEnd != null &&
+      subscription.currentPeriodEnd > now
     );
   }
 }

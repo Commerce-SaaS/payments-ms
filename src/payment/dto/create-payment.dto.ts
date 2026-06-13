@@ -7,15 +7,14 @@ import {
   IsPositive,
   IsObject,
   IsUrl,
-  IsCurrency,
 } from 'class-validator';
 import { PaymentProvider } from '../enums/payment-provider.enum';
 
 export class CreatePaymentDto {
+  @IsOptional()
   @IsUUID()
-  organizationId: string;
+  organizationId?: string;
 
-  // Puede ser pago de order o de subscription
   @IsOptional()
   @IsUUID()
   orderId?: string;
@@ -36,8 +35,17 @@ export class CreatePaymentDto {
   @IsString()
   currency?: string;
 
+  @IsOptional()
+  @IsString()
+  paymentMethodId?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentMethodName?: string;
+
+  @IsOptional()
   @IsEnum(PaymentProvider)
-  provider: PaymentProvider;
+  provider?: PaymentProvider;
 
   @IsOptional()
   @IsString()

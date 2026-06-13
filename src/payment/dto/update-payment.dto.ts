@@ -6,9 +6,18 @@ import {
   IsString,
   IsDate,
 } from 'class-validator';
-import { PaymentStatus } from '../enums/payment-status.enum';
+import { PaymentStatus } from '../../common/dto/payment-status.enum';
+import { FailureReason } from '../enums/payment-failure-reason.enum';
 
 export class UpdatePaymentDto {
+  @IsString()
+  paymentId: string;
+
+  
+  @IsOptional()
+  @IsString()
+  organizationId?: string;
+
   @IsOptional()
   @IsEnum(PaymentStatus)
   status?: PaymentStatus;
@@ -37,9 +46,9 @@ export class UpdatePaymentDto {
   @IsOptional()
   checkoutUrl?: string;
 
-  @IsString()
   @IsOptional()
-  failureReason?: string;
+  @IsEnum(FailureReason)
+  failureReason?: FailureReason;
 
   @IsDate()
   @IsOptional()

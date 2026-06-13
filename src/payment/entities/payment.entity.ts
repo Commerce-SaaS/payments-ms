@@ -6,20 +6,24 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
-import { PaymentStatus } from '../enums/payment-status.enum';
+import { PaymentStatus } from '../../common/dto/payment-status.enum';
 import { PaymentProvider } from '../enums/payment-provider.enum';
+import { FailureReason } from '../enums/payment-failure-reason.enum';
 
 @Entity()
 @Index(['orderId'])
 @Index(['subscriptionId'])
 @Index(['externalPaymentId'])
 @Index(['externalSessionId'])
+@Index(['organizationId', 'status'])
+@Index(['organizationId', 'createdAt'])
+@Index(['organizationId', 'provider'])
 export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
-  organizationId: string;
+  @Column({ nullable: true })
+  organizationId?: string;
 
   @Column({ nullable: true })
   orderId?: string;
@@ -49,26 +53,36 @@ export class Payment {
   })
   provider: PaymentProvider;
 
-  // 🔹 ID del pago en el proveedor
+  @Column({ nullable: true })
+  paymentMethodId?: string; 
+
+  @Column({ nullable: true })
+  paymentMethodName?: string;
+
   @Column({ nullable: true })
   externalPaymentId?: string;
 
-  // 🔹 ID de sesión (si el proveedor usa sesiones)
   @Column({ nullable: true })
   externalSessionId?: string;
 
-  // 🔹 Datos extra específicos del proveedor
   @Column({ type: 'json', nullable: true })
   providerMetadata?: Record<string, any>;
 
   @Column({ nullable: true })
   checkoutUrl?: string;
 
-  @Column({ nullable: true })
-  failureReason?: string;
+  @Column({
+    type: 'enum',
+    enum: FailureReason,
+    nullable: true,
+  })
+  failureReason?: FailureReason;
 
   @Column({ type: 'timestamp', nullable: true })
   paidAt?: Date;
+
+  @Column({ type: 'timestamp', nullable: true })
+  cancelledAt?: Date;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -1,17 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { STRIPE_CLIENT } from 'src/config/services';
-import { PaymentStatus } from 'src/payment/enums/payment-status.enum';
+import { PaymentStatus } from 'src/common/dto/payment-status.enum';
 import { PaymentService } from 'src/payment/payment.service';
 import { SubscriptionPlan } from 'src/subscription/enums/subscription-plan.enum';
 import { SubscriptionStatus } from 'src/subscription/enums/subscription-status.enum';
 import { SubscriptionService } from 'src/subscription/subscription.service';
 import Stripe from 'stripe';
+import Redis from 'ioredis';
 
 @Injectable()
 export class SubscriptionHandler {
   constructor(
     @Inject(STRIPE_CLIENT)
     private readonly stripe: Stripe,
+    @Inject('REDIS_CLIENT')
+    private readonly redis: Redis,
     private readonly subscriptionService: SubscriptionService,
     private readonly paymentService: PaymentService,
   ) {}
@@ -19,7 +22,7 @@ export class SubscriptionHandler {
   async handleSubscriptionPaid(invoice: Stripe.Invoice) {
     const subscriptionDetails = invoice.parent?.subscription_details;
     try {
-      // 1️⃣ Validar que sea una invoice de subscription
+      // 1. Validate it's a subscription invoice
       if (subscriptionDetails?.subscription === null) {
         return { success: false, reason: 'Not a subscription invoice' };
       }
@@ -28,7 +31,7 @@ export class SubscriptionHandler {
       const subscriptionId = subscriptionDetails?.metadata
         ?.subscriptionId as string;
 
-      // 2️⃣ Buscar tu subscription interna
+      // 2. Find internal subscription
       const subscription =
         await this.subscriptionService.findOne(subscriptionId);
 
@@ -36,7 +39,7 @@ export class SubscriptionHandler {
         return { success: false, reason: 'Subscription not found' };
       }
 
-      // 3️⃣ Obtener datos actuales de Stripe (con try/catch)
+      // 3. Retrieve current data from Stripe
       let stripeSub: Stripe.Subscription;
 
       try {
@@ -45,30 +48,51 @@ export class SubscriptionHandler {
           { expand: ['items.data.price.product'] },
         );
       } catch (error) {
-        console.error('Stripe subscription retrieve failed', error);
         return { success: false };
       }
 
       const price = stripeSub.items.data[0]?.price;
       const product = price?.product as Stripe.Product;
+      const item = stripeSub.items.data[0];
+      const planNameMap: Record<string, SubscriptionPlan> = {
+        basic: SubscriptionPlan.BASIC,
+        base: SubscriptionPlan.BASIC,
+        pro: SubscriptionPlan.PRO,
+      };
+      const resolvedPlan =
+        planNameMap[product?.name?.toLowerCase()] ?? SubscriptionPlan.BASIC;
 
-      // 4️⃣ Actualizar subscription SOLO con datos reales del período actual
+      // 4. Update subscription with real period data
       await this.subscriptionService.update(subscription.id, {
-        currentPeriodStart: new Date(invoice.period_start * 1000),
-        currentPeriodEnd: new Date(invoice.period_end * 1000),
+        currentPeriodStart: item?.current_period_start
+          ? new Date(item.current_period_start * 1000)
+          : new Date(invoice.period_start * 1000),
+        currentPeriodEnd: item?.current_period_end
+          ? new Date(item.current_period_end * 1000)
+          : new Date(invoice.period_end * 1000),
         status: SubscriptionStatus.ACTIVE,
-        plan: product?.name as SubscriptionPlan,
+        plan: resolvedPlan,
         stripeSubscriptionId: stripeSubscriptionId,
+        cancelAtPeriodEnd: false,
+        priceAmount: price?.unit_amount ?? undefined,
+        currency: price?.currency ?? undefined,
+        stripePriceId: price?.id ?? undefined,
       });
 
-      // 5️⃣ Marcar payment como completado si existe
+      // 5. Mark payment as completed if exists
       const paymentId = subscriptionDetails?.metadata?.paymentId;
+      const organizationId = subscriptionDetails?.metadata?.organizationId;
 
       if (paymentId) {
-        await this.paymentService.update(paymentId, {
+        await this.paymentService.update({
+          paymentId,
           status: PaymentStatus.COMPLETED,
+          organizationId: organizationId ?? ""
         });
       }
+
+      // 6. Invalidate subscription cache
+      await this.invalidateCache(subscription.userId);
 
       return { success: true };
     } catch (error) {
@@ -77,10 +101,94 @@ export class SubscriptionHandler {
     }
   }
 
-  handleSubscriptionDeleted(object: Stripe.Subscription) {
-    throw new Error('Method not implemented.');
+  async handleSubscriptionDeleted(object: Stripe.Subscription) {
+    try {
+      const subscriptionId = object.metadata?.subscriptionId;
+      if (!subscriptionId) return { success: false, reason: 'No subscriptionId in metadata' };
+
+      const subscription = await this.subscriptionService.findOne(subscriptionId);
+      if (!subscription) return { success: false, reason: 'Subscription not found' };
+
+      await this.subscriptionService.update(subscription.id, {
+        status: SubscriptionStatus.CANCELED,
+        cancelAtPeriodEnd: false,
+      });
+
+      await this.invalidateCache(subscription.userId);
+
+      return { success: true };
+    } catch (error) {
+      console.error('handleSubscriptionDeleted error', error);
+      return { success: false };
+    }
   }
-  handleSubscriptionPaymentFailed(object: Stripe.Invoice) {
-    throw new Error('Method not implemented.');
+
+  async handleSubscriptionPaymentFailed(object: Stripe.Invoice) {
+    try {
+      const subscriptionId =
+        object.parent?.subscription_details?.metadata?.subscriptionId;
+      if (!subscriptionId) return { success: false, reason: 'No subscriptionId in metadata' };
+
+      const subscription = await this.subscriptionService.findOne(subscriptionId);
+      if (!subscription) return { success: false, reason: 'Subscription not found' };
+
+      await this.subscriptionService.update(subscription.id, {
+        status: SubscriptionStatus.PAST_DUE,
+      });
+
+      await this.invalidateCache(subscription.userId);
+
+      return { success: true };
+    } catch (error) {
+      console.error('handleSubscriptionPaymentFailed error', error);
+      return { success: false };
+    }
+  }
+
+  async handleSubscriptionUpdated(stripeSub: Stripe.Subscription) {
+    try {
+      const subscriptionId = stripeSub.metadata?.subscriptionId;
+      if (!subscriptionId) return { success: false, reason: 'No subscriptionId in metadata' };
+
+      const subscription = await this.subscriptionService.findOne(subscriptionId);
+      if (!subscription) return { success: false, reason: 'Subscription not found' };
+
+      const statusMap: Record<string, SubscriptionStatus> = {
+        active: SubscriptionStatus.ACTIVE,
+        past_due: SubscriptionStatus.PAST_DUE,
+        canceled: SubscriptionStatus.CANCELED,
+        trialing: SubscriptionStatus.TRIAL,
+      };
+
+      const item = stripeSub.items.data[0];
+      const price = item?.price;
+
+      await this.subscriptionService.update(subscription.id, {
+        status: statusMap[stripeSub.status] ?? subscription.status,
+        currentPeriodStart: item?.current_period_start
+          ? new Date(item.current_period_start * 1000)
+          : undefined,
+        currentPeriodEnd: item?.current_period_end
+          ? new Date(item.current_period_end * 1000)
+          : undefined,
+        cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false,
+        priceAmount: price?.unit_amount ?? undefined,
+        currency: price?.currency ?? undefined,
+        stripePriceId: price?.id ?? undefined,
+      });
+
+      await this.invalidateCache(subscription.userId);
+
+      return { success: true };
+    } catch (error) {
+      console.error('handleSubscriptionUpdated error', error);
+      return { success: false };
+    }
+  }
+
+  private async invalidateCache(userId?: string) {
+    if (userId) {
+      await this.redis.del(`sub:user:${userId}`);
+    }
   }
 }

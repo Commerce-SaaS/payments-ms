@@ -7,6 +7,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { envs } from './config';
 import { ConfigModule } from '@nestjs/config';
 import { StripeModule } from './stripe/stripe.module';
+import { RedisModule } from './redis/redis.module';
+import { ORDERS_EVENTS_CLIENT, ORGANIZATION_EVENTS_CLIENT } from './config/services';
+import { RabbitMQModule } from './config/transports/rabbitmq.module';
+import { PaymentMethodsModule } from './payment-methods/payment-methods.module';
 
 @Module({
   imports: [
@@ -21,11 +25,23 @@ import { StripeModule } from './stripe/stripe.module';
       autoLoadEntities: true,
       synchronize: envs.nodeEnv === 'development',
     }),
+    RedisModule,
     SubscriptionModule,
     PaymentModule,
     WebhooksModule,
     AccessModule,
     StripeModule,
+    RabbitMQModule.register({
+      name: ORDERS_EVENTS_CLIENT,
+      queue: envs.rabbitmqOrdersEventQueue,
+      url: envs.rabbitmqUrl,
+    }),
+    RabbitMQModule.register({
+      name: ORGANIZATION_EVENTS_CLIENT,
+      queue: envs.rabbitmqOrganizationQueue,
+      url: envs.rabbitmqUrl,
+    }),
+    PaymentMethodsModule,
   ],
   controllers: [],
   providers: [],

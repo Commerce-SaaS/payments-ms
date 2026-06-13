@@ -1,7 +1,6 @@
-import { IsEnum, IsUUID } from "class-validator";
-import { SubscriptionPlan } from "../enums/subscription-plan.enum";
+import { IsUUID } from "class-validator";
 
 export class CreateSubscriptionDto {
   @IsUUID()
-  organizationId: string;
+  userId: string;
 }
