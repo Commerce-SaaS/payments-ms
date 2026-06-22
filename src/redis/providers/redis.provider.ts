@@ -8,6 +8,7 @@ export const RedisProvider: Provider = {
     return new Redis({
       host: envs.redisHost,
       port: envs.redisPort,
+      password: envs.redisPass
     });
   },
 };

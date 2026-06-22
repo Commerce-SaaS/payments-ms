@@ -13,10 +13,13 @@ import {
 } from 'src/config/services';
 import { ORDER_PATTERNS } from './patterns/order-patterns';
 import { ORGANIZATION_PATTERNS } from './patterns/organization_patterns';
+import Redis from 'ioredis';
 
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
+
+  private readonly EVENT_TTL = 60 * 60 * 72;
 
   constructor(
     private readonly paymentService: PaymentService,
@@ -25,15 +28,34 @@ export class WebhooksService {
     private readonly ordersClient: ClientProxy,
     @Inject(ORGANIZATION_EVENTS_CLIENT)
     private readonly organizationEventsClient: ClientProxy,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
   async handleEvent(payload: WebhookEvent) {
-    if (payload.provider !== PaymentProvider.STRIPE) {
-      return { ignored: true };
-    }
-
+    if (payload.provider !== PaymentProvider.STRIPE) return { ignored: true };
     const { event } = payload;
 
+    const doneKey = `stripe:evt:done:${event.id}`;
+    const lockKey = `stripe:evt:lock:${event.id}`;
+
+    if (await this.redis.get(doneKey)) {
+      this.logger.log(`Duplicate Stripe event skipped: ${event.id}`);
+      return { idempotent: true };
+    }
+
+    const locked = await this.redis.set(lockKey, '1', 'EX', 60, 'NX');
+    if (locked !== 'OK') return { inProgress: true }; // otra entrega lo está procesando
+
+    try {
+      const result = await this.processEvent(event); // ← el switch actual movido acá
+      await this.redis.set(doneKey, '1', 'EX', this.EVENT_TTL); // marca OK solo si no tiró
+      return result;
+    } finally {
+      await this.redis.del(lockKey);
+    }
+  }
+
+  private async processEvent(event: Stripe.Event) {
     switch (event.type) {
       case 'checkout.session.completed':
         await this.handleCheckoutCompleted(
@@ -47,42 +69,45 @@ export class WebhooksService {
         );
         break;
 
+      // All subscription invoices (including the first onboarding payment) are
+      // routed here. Full activation (status, periods, plan) happens in
+      // handleSubscriptionPaid, which also marks the associated payment record.
       case 'invoice.paid':
-        if (this.isOnboardingSubscriptionInvoice(event.data.object)) {
-          return this.handleOnboardingSubscriptionPaid(event.data.object);
-        }
         return this.subscriptionHandler.handleSubscriptionPaid(
-          event.data.object,
+          event.data.object as Stripe.Invoice,
         );
 
       case 'invoice.payment_failed':
-        if (this.isOnboardingSubscriptionInvoice(event.data.object)) {
-          return this.handleOnboardingSubscriptionFailed(event.data.object);
-        }
         return this.subscriptionHandler.handleSubscriptionPaymentFailed(
-          event.data.object,
+          event.data.object as Stripe.Invoice,
         );
 
       case 'customer.subscription.deleted':
         return this.subscriptionHandler.handleSubscriptionDeleted(
-          event.data.object,
+          event.data.object as Stripe.Subscription,
         );
 
       case 'customer.subscription.updated':
         return this.subscriptionHandler.handleSubscriptionUpdated(
-          event.data.object,
+          event.data.object as Stripe.Subscription,
         );
 
       case 'payment_intent.succeeded':
-        await this.handlePaymentSucceeded(event.data.object);
+        await this.handlePaymentSucceeded(
+          event.data.object as Stripe.PaymentIntent,
+        );
         return { success: true };
 
       case 'payment_intent.payment_failed':
-        await this.handlePaymentFailed(event.data.object);
+        await this.handlePaymentFailed(
+          event.data.object as Stripe.PaymentIntent,
+        );
         return { failed: true };
 
       case 'payment_intent.canceled':
-        await this.handlePaymentCanceled(event.data.object);
+        await this.handlePaymentCanceled(
+          event.data.object as Stripe.PaymentIntent,
+        );
         return { failed: true };
 
       // ─── CONNECT ──────────────────────────────────────────────────
@@ -93,7 +118,7 @@ export class WebhooksService {
       case 'account.application.deauthorized':
         return this.handleAccountDeauthorized(
           event.data.object as Stripe.Application,
-          event.account, // ← stripeAccountId del connected account
+          event.account,
         );
 
       case 'account.external_account.created':
@@ -118,9 +143,6 @@ export class WebhooksService {
     } = account;
     const organizationId = metadata?.organizationId;
 
-    console.log(account)
-    console.log(organizationId)
-
     if (!organizationId) {
       this.logger.warn(
         `account.updated: no organizationId in metadata for account=${stripeAccountId}`,
@@ -128,13 +150,11 @@ export class WebhooksService {
       return { ignored: true };
     }
 
-    // Onboarding completado
     if (charges_enabled && payouts_enabled) {
       this.logger.log(
         `account.updated: onboarding complete for account=${stripeAccountId}, org=${organizationId}`,
       );
 
-      // Confirmar stripeAccountId en la organización (por si no se guardó antes)
       this.organizationEventsClient.emit(ORGANIZATION_PATTERNS.UPDATE_EVENT, {
         id: organizationId,
         stripeAccountId: stripeAccountId,
@@ -159,7 +179,6 @@ export class WebhooksService {
       `account.application.deauthorized: clearing stripeAccountId=${stripeAccountId}`,
     );
 
-    // Limpiar el stripeAccountId de la organización
     this.organizationEventsClient.emit(
       ORGANIZATION_PATTERNS.CLEAR_STRIPE_ACCOUNT,
       { stripeAccountId },
@@ -167,12 +186,11 @@ export class WebhooksService {
 
     return { accountDisconnected: true };
   }
+  // ─── OTHER HANDLERS ───────────────────────────────────────────────
 
-  // ─── RESTO DE HANDLERS (sin cambios) ─────────────────────────────
-
-  async handleCheckoutCompleted(session: Stripe.Checkout.Session) {
-    const { paymentId } = session.metadata || {};
-    if (!paymentId) return;
+  async handleCheckoutCompleted(_session: Stripe.Checkout.Session) {
+    // Subscription activation happens on invoice.paid, not here.
+    // For one-time payment flows, activation happens on payment_intent.succeeded.
   }
 
   async handleCheckoutExpired(session: Stripe.Checkout.Session) {
@@ -231,45 +249,10 @@ export class WebhooksService {
     if (object.metadata?.orderId) {
       this.ordersClient.emit(ORDER_PATTERNS.PAYMENT_STATUS, {
         id: object.metadata.orderId,
+        organizationId,
         paymentStatus: PaymentStatus.PAID,
       });
     }
     return { success: true };
-  }
-
-  private isOnboardingSubscriptionInvoice(invoice: Stripe.Invoice): boolean {
-    const metadata = invoice.parent?.subscription_details?.metadata;
-    return metadata?.type === 'ONBOARDING_SUBSCRIPTION';
-  }
-
-  private async handleOnboardingSubscriptionPaid(invoice: Stripe.Invoice) {
-    const metadata = invoice.parent?.subscription_details?.metadata;
-    const paymentId = metadata?.paymentId;
-    const organizationId = metadata?.organizationId;
-    if (!paymentId) return { ignored: true };
-
-    await this.paymentService.update({
-      paymentId,
-      status: PaymentStatus.COMPLETED,
-      paidAt: new Date(),
-      amount: invoice.amount_paid,
-      organizationId: organizationId || '',
-    });
-    return { success: true };
-  }
-
-  private async handleOnboardingSubscriptionFailed(invoice: Stripe.Invoice) {
-    const metadata = invoice.parent?.subscription_details?.metadata;
-    const paymentId = metadata?.paymentId;
-    const organizationId = metadata?.organizationId;
-    if (!paymentId) return { ignored: true };
-
-    await this.paymentService.update({
-      paymentId,
-      status: PaymentStatus.FAILED,
-      failureReason: FailureReason.PAYMENT_FAILED,
-      organizationId: organizationId || '',
-    });
-    return { failed: true };
   }
 }

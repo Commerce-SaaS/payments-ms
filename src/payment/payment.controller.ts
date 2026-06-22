@@ -4,7 +4,6 @@ import { PaymentService } from './payment.service';
 import { PAYMENT_PATTERNS } from './patterns/payment_patterns';
 import { CreatePaymentSessionDto } from './dto/create-payment-session.dto';
 import { PaymentsPaginationDto } from './dto/payments-pagination.dto';
-import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { CancelPaymentDto } from './dto/cancel-payment.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 

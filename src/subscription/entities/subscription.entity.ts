@@ -27,7 +27,7 @@ export class Subscription {
   @Column({
     type: 'enum',
     enum: SubscriptionStatus,
-    default: SubscriptionStatus.TRIAL,
+    default: SubscriptionStatus.PROCESSING,
   })
   status: SubscriptionStatus;
 

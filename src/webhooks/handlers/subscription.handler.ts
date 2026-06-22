@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { STRIPE_CLIENT } from 'src/config/services';
+import { envs } from 'src/config';
 import { PaymentStatus } from 'src/common/dto/payment-status.enum';
 import { PaymentService } from 'src/payment/payment.service';
 import { SubscriptionPlan } from 'src/subscription/enums/subscription-plan.enum';
@@ -21,48 +22,33 @@ export class SubscriptionHandler {
 
   async handleSubscriptionPaid(invoice: Stripe.Invoice) {
     const subscriptionDetails = invoice.parent?.subscription_details;
+
+    // Non-recoverable: not a subscription invoice
+    if (!subscriptionDetails?.subscription) {
+      return { success: false, reason: 'Not a subscription invoice' };
+    }
+
+    const stripeSubscriptionId = subscriptionDetails.subscription as string;
+    const subscriptionId = subscriptionDetails.metadata?.subscriptionId;
+
+    // Non-recoverable: metadata missing — re-sending will not fix it
+    if (!subscriptionId) {
+      return { success: false, reason: 'No subscriptionId in metadata' };
+    }
+
     try {
-      // 1. Validate it's a subscription invoice
-      if (subscriptionDetails?.subscription === null) {
-        return { success: false, reason: 'Not a subscription invoice' };
-      }
+      const subscription = await this.subscriptionService.findOne(subscriptionId);
 
-      const stripeSubscriptionId = subscriptionDetails?.subscription as string;
-      const subscriptionId = subscriptionDetails?.metadata
-        ?.subscriptionId as string;
+      const stripeSub = await this.stripe.subscriptions.retrieve(
+        stripeSubscriptionId,
+        { expand: ['items.data.price.product'] },
+      );
 
-      // 2. Find internal subscription
-      const subscription =
-        await this.subscriptionService.findOne(subscriptionId);
-
-      if (!subscription) {
-        return { success: false, reason: 'Subscription not found' };
-      }
-
-      // 3. Retrieve current data from Stripe
-      let stripeSub: Stripe.Subscription;
-
-      try {
-        stripeSub = await this.stripe.subscriptions.retrieve(
-          stripeSubscriptionId,
-          { expand: ['items.data.price.product'] },
-        );
-      } catch (error) {
-        return { success: false };
-      }
-
-      const price = stripeSub.items.data[0]?.price;
-      const product = price?.product as Stripe.Product;
       const item = stripeSub.items.data[0];
-      const planNameMap: Record<string, SubscriptionPlan> = {
-        basic: SubscriptionPlan.BASIC,
-        base: SubscriptionPlan.BASIC,
-        pro: SubscriptionPlan.PRO,
-      };
-      const resolvedPlan =
-        planNameMap[product?.name?.toLowerCase()] ?? SubscriptionPlan.BASIC;
+      const price = item?.price;
+      const product = price?.product as Stripe.Product | undefined;
+      const resolvedPlan = this.resolvePlan(price?.id, product?.name);
 
-      // 4. Update subscription with real period data
       await this.subscriptionService.update(subscription.id, {
         currentPeriodStart: item?.current_period_start
           ? new Date(item.current_period_start * 1000)
@@ -71,43 +57,40 @@ export class SubscriptionHandler {
           ? new Date(item.current_period_end * 1000)
           : new Date(invoice.period_end * 1000),
         status: SubscriptionStatus.ACTIVE,
-        plan: resolvedPlan,
-        stripeSubscriptionId: stripeSubscriptionId,
+        plan: resolvedPlan ?? subscription.plan,
+        stripeSubscriptionId,
         cancelAtPeriodEnd: false,
         priceAmount: price?.unit_amount ?? undefined,
         currency: price?.currency ?? undefined,
         stripePriceId: price?.id ?? undefined,
       });
 
-      // 5. Mark payment as completed if exists
-      const paymentId = subscriptionDetails?.metadata?.paymentId;
-      const organizationId = subscriptionDetails?.metadata?.organizationId;
+      const paymentId = subscriptionDetails.metadata?.paymentId;
+      const organizationId = subscriptionDetails.metadata?.organizationId;
 
       if (paymentId) {
         await this.paymentService.update({
           paymentId,
           status: PaymentStatus.COMPLETED,
-          organizationId: organizationId ?? ""
+          organizationId: organizationId ?? '',
         });
       }
 
-      // 6. Invalidate subscription cache
       await this.invalidateCache(subscription.userId);
-
       return { success: true };
     } catch (error) {
       console.error('handleSubscriptionPaid error', error);
-      return { success: false };
+      throw error; // Re-throw so the transport retries on transient errors
     }
   }
 
   async handleSubscriptionDeleted(object: Stripe.Subscription) {
-    try {
-      const subscriptionId = object.metadata?.subscriptionId;
-      if (!subscriptionId) return { success: false, reason: 'No subscriptionId in metadata' };
+    const subscriptionId = object.metadata?.subscriptionId;
+    // Non-recoverable: no subscriptionId means we can never resolve this event
+    if (!subscriptionId) return { success: false, reason: 'No subscriptionId in metadata' };
 
+    try {
       const subscription = await this.subscriptionService.findOne(subscriptionId);
-      if (!subscription) return { success: false, reason: 'Subscription not found' };
 
       await this.subscriptionService.update(subscription.id, {
         status: SubscriptionStatus.CANCELED,
@@ -115,56 +98,60 @@ export class SubscriptionHandler {
       });
 
       await this.invalidateCache(subscription.userId);
-
       return { success: true };
     } catch (error) {
       console.error('handleSubscriptionDeleted error', error);
-      return { success: false };
+      throw error;
     }
   }
 
-  async handleSubscriptionPaymentFailed(object: Stripe.Invoice) {
-    try {
-      const subscriptionId =
-        object.parent?.subscription_details?.metadata?.subscriptionId;
-      if (!subscriptionId) return { success: false, reason: 'No subscriptionId in metadata' };
+  async handleSubscriptionPaymentFailed(invoice: Stripe.Invoice) {
+    const subscriptionId =
+      invoice.parent?.subscription_details?.metadata?.subscriptionId;
+    // Non-recoverable: no subscriptionId means we can never resolve this event
+    if (!subscriptionId) return { success: false, reason: 'No subscriptionId in metadata' };
 
+    try {
       const subscription = await this.subscriptionService.findOne(subscriptionId);
-      if (!subscription) return { success: false, reason: 'Subscription not found' };
 
       await this.subscriptionService.update(subscription.id, {
         status: SubscriptionStatus.PAST_DUE,
       });
 
       await this.invalidateCache(subscription.userId);
-
       return { success: true };
     } catch (error) {
       console.error('handleSubscriptionPaymentFailed error', error);
-      return { success: false };
+      throw error;
     }
   }
 
   async handleSubscriptionUpdated(stripeSub: Stripe.Subscription) {
-    try {
-      const subscriptionId = stripeSub.metadata?.subscriptionId;
-      if (!subscriptionId) return { success: false, reason: 'No subscriptionId in metadata' };
+    const subscriptionId = stripeSub.metadata?.subscriptionId;
+    // Non-recoverable: no subscriptionId means we can never resolve this event
+    if (!subscriptionId) return { success: false, reason: 'No subscriptionId in metadata' };
 
+    try {
       const subscription = await this.subscriptionService.findOne(subscriptionId);
-      if (!subscription) return { success: false, reason: 'Subscription not found' };
 
       const statusMap: Record<string, SubscriptionStatus> = {
         active: SubscriptionStatus.ACTIVE,
         past_due: SubscriptionStatus.PAST_DUE,
         canceled: SubscriptionStatus.CANCELED,
-        trialing: SubscriptionStatus.TRIAL,
+        incomplete: SubscriptionStatus.INCOMPLETE,
+        incomplete_expired: SubscriptionStatus.EXPIRED,
+        unpaid: SubscriptionStatus.PAST_DUE, // no distinct UNPAID state; treat as past_due
+        paused: SubscriptionStatus.PAUSED,
       };
 
       const item = stripeSub.items.data[0];
       const price = item?.price;
+      // product is not expanded in webhook events, so resolvePlan uses priceId map only
+      const resolvedPlan = this.resolvePlan(price?.id);
 
       await this.subscriptionService.update(subscription.id, {
         status: statusMap[stripeSub.status] ?? subscription.status,
+        plan: resolvedPlan ?? subscription.plan,
         currentPeriodStart: item?.current_period_start
           ? new Date(item.current_period_start * 1000)
           : undefined,
@@ -178,12 +165,35 @@ export class SubscriptionHandler {
       });
 
       await this.invalidateCache(subscription.userId);
-
       return { success: true };
     } catch (error) {
       console.error('handleSubscriptionUpdated error', error);
-      return { success: false };
+      throw error;
     }
+  }
+
+  /**
+   * Resolves a SubscriptionPlan from a Stripe price ID, falling back to the
+   * product name when the price ID is not in the configured map.
+   *
+   * Configure STRIPE_PRICE_ID_BASIC / STRIPE_PRICE_ID_PRO in env so that
+   * handleSubscriptionUpdated (which receives no expanded product) also resolves
+   * the plan correctly.
+   */
+  private resolvePlan(priceId?: string, productName?: string): SubscriptionPlan | undefined {
+    if (priceId) {
+      if (priceId === envs.stripePriceIdBasic) return SubscriptionPlan.BASIC;
+      if (priceId === envs.stripePriceIdPro) return SubscriptionPlan.PRO;
+    }
+    if (productName) {
+      const nameMap: Record<string, SubscriptionPlan> = {
+        basic: SubscriptionPlan.BASIC,
+        base: SubscriptionPlan.BASIC,
+        pro: SubscriptionPlan.PRO,
+      };
+      return nameMap[productName.toLowerCase()];
+    }
+    return undefined;
   }
 
   private async invalidateCache(userId?: string) {

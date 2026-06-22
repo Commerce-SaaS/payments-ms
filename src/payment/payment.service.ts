@@ -5,7 +5,6 @@ import { Payment } from './entities/payment.entity';
 import { PaymentStatus } from '../common/dto/payment-status.enum';
 import { RpcExceptionHelper } from 'src/common/helpers/rpc-exception.helper';
 import { PaymentErrorCode } from './enums/payment-error-code.enum';
-import Stripe from 'stripe';
 import { envs } from 'src/config';
 import { CreatePaymentSessionDto } from './dto/create-payment-session.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -22,14 +21,13 @@ export class PaymentService {
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
     @Inject(STRIPE_CLIENT)
-    private readonly stripe: Stripe,
     private readonly providerFactory: PaymentProviderFactory,
   ) {}
+
   async create(dto: CreatePaymentDto) {
     try {
       const payment = this.paymentRepository.create({
         ...dto,
-        amount: Math.round(dto.amount * 100),
       });
       return await this.paymentRepository.save(payment);
     } catch (error) {
@@ -48,11 +46,18 @@ export class PaymentService {
       );
     }
 
-    if (payment.organizationId !== dto.organizationId) {
+    if (
+      !payment.subscriptionId &&
+      payment.organizationId !== dto.organizationId
+    ) {
       RpcExceptionHelper.forbidden(
         PaymentErrorCode.PAYMENT_FORBIDDEN,
         'You do not have access to this payment',
       );
+    }
+
+    if (dto.status && payment.status === dto.status) {
+      return payment;
     }
 
     if (
@@ -84,7 +89,7 @@ export class PaymentService {
       userId,
       stripeAccountId,
     } = dto;
-    // 1️⃣ Evitar pagos duplicados
+
     const existingPayment = await this.getPendingPayment({ orderId }, provider);
 
     if (existingPayment?.checkoutUrl) {
@@ -94,7 +99,6 @@ export class PaymentService {
       };
     }
 
-    // 2️⃣ Crear registro Payment
     const payment = await this.paymentRepository.save({
       organizationId,
       orderId,
@@ -104,7 +108,6 @@ export class PaymentService {
       status: PaymentStatus.PENDING,
     });
 
-    // 3️⃣ Delegar al provider correspondiente
     const providerStrategy = this.providerFactory.get(provider);
 
     const session = await providerStrategy.createSession({
@@ -121,7 +124,6 @@ export class PaymentService {
       mode: 'payment',
     });
 
-    // 4️⃣ Guardar datos del proveedor (GENÉRICO)
     await this.paymentRepository.update(payment.id, {
       externalPaymentId: session.externalPaymentId,
       externalSessionId: session.externalSessionId,
@@ -184,7 +186,7 @@ export class PaymentService {
         orderId: p.orderId ?? null,
         subscriptionId: p.subscriptionId ?? null,
         userId: p.userId ?? null,
-        amount: p.amount / 100,
+        amount: p.amount,
         currency: p.currency,
         status: p.status,
         provider: p.provider,
@@ -227,7 +229,7 @@ export class PaymentService {
       orderId: payment.orderId ?? null,
       subscriptionId: payment.subscriptionId ?? null,
       userId: payment.userId ?? null,
-      amount: payment.amount / 100,
+      amount: payment.amount,
       currency: payment.currency,
       status: payment.status,
       provider: payment.provider,
@@ -256,7 +258,7 @@ export class PaymentService {
       orderId: payment.orderId ?? null,
       subscriptionId: payment.subscriptionId ?? null,
       userId: payment.userId ?? null,
-      amount: payment.amount / 100,
+      amount: payment.amount,
       currency: payment.currency,
       status: payment.status,
       provider: payment.provider,
@@ -276,7 +278,7 @@ export class PaymentService {
       );
     }
 
-    if (payment.organizationId !== organizationId) {
+    if (!payment.subscriptionId && payment.organizationId !== organizationId) {
       RpcExceptionHelper.forbidden(
         PaymentErrorCode.PAYMENT_FORBIDDEN,
         'You do not have access to this payment',

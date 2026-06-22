@@ -8,7 +8,7 @@ export class AccessService {
   ) {}
 
   async checkAccess(userId: string) {
-    const subscription = await this.subscriptionService.findByUser(userId);
+    const subscription = await this.subscriptionService.getByUser(userId).catch(() => null);
 
     if (!subscription) {
       return {
@@ -30,8 +30,8 @@ export class AccessService {
   }
 
   async checkOnboarding(userId: string) {
-    const subscription = await this.subscriptionService.findByUser(userId);
-    const paid = subscription ? this.subscriptionService.isPaid(subscription) : false;
+    const subscription = await this.subscriptionService.getByUser(userId).catch(() => null);
+    const paid = subscription ? this.subscriptionService.isActive(subscription) : false;
 
     return {
       paid,

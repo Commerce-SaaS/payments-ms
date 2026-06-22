@@ -21,6 +21,9 @@ const envSchema = z
     STRIPE_SECRET: z.string().min(1, 'STRIPE_SECRET cannot be empty'),
     REDIS_HOST: z.string(),
     REDIS_PORT: z.coerce.number().default(6379),
+    REDIS_PASS: z.string(),
+    STRIPE_PRICE_ID_BASIC: z.string().min(1, 'STRIPE_PRICE_ID_BASIC cannot be empty'),
+    STRIPE_PRICE_ID_PRO: z.string().min(1, 'STRIPE_PRICE_ID_PRO cannot be empty'),
   })
   .required();
 
@@ -50,5 +53,8 @@ export const envs = {
   stripeSecret: parsedEnv.data.STRIPE_SECRET,
   redisHost: parsedEnv.data.REDIS_HOST,
   redisPort: parsedEnv.data.REDIS_PORT,
+  redisPass: parsedEnv.data.REDIS_PASS,
   rabbitmqOrganizationQueue: parsedEnv.data.RABBITMQ_QUEUE_EVENTS_ORGANIZATION,
+  stripePriceIdBasic: parsedEnv.data.STRIPE_PRICE_ID_BASIC,
+  stripePriceIdPro: parsedEnv.data.STRIPE_PRICE_ID_PRO,
 };
