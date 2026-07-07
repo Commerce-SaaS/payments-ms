@@ -69,7 +69,7 @@ export class SubscriptionHandler {
       const organizationId = subscriptionDetails.metadata?.organizationId;
 
       if (paymentId) {
-        await this.paymentService.update({
+        await this.paymentService.updateStatus({
           paymentId,
           status: PaymentStatus.COMPLETED,
           organizationId: organizationId ?? '',
@@ -196,7 +196,7 @@ export class SubscriptionHandler {
     return undefined;
   }
 
-  private async invalidateCache(userId?: string) {
+  private async invalidateCache(userId?: string | null) {
     if (userId) {
       await this.redis.del(`sub:user:${userId}`);
     }

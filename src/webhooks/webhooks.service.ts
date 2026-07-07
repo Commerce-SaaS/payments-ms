@@ -5,7 +5,7 @@ import Stripe from 'stripe';
 import { PaymentStatus } from 'src/common/dto/payment-status.enum';
 import { PaymentService } from 'src/payment/payment.service';
 import { SubscriptionHandler } from './handlers/subscription.handler';
-import { FailureReason } from 'src/payment/enums/payment-failure-reason.enum';
+import { PaymentCancellationReason } from 'src/payment/enums/payment-cancellation-reason.enum';
 import { ClientProxy } from '@nestjs/microservices/client/client-proxy';
 import {
   ORDERS_EVENTS_CLIENT,
@@ -44,11 +44,11 @@ export class WebhooksService {
     }
 
     const locked = await this.redis.set(lockKey, '1', 'EX', 60, 'NX');
-    if (locked !== 'OK') return { inProgress: true }; // otra entrega lo está procesando
+    if (locked !== 'OK') return { inProgress: true };
 
     try {
-      const result = await this.processEvent(event); // ← el switch actual movido acá
-      await this.redis.set(doneKey, '1', 'EX', this.EVENT_TTL); // marca OK solo si no tiró
+      const result = await this.processEvent(event);
+      await this.redis.set(doneKey, '1', 'EX', this.EVENT_TTL);
       return result;
     } finally {
       await this.redis.del(lockKey);
@@ -96,6 +96,7 @@ export class WebhooksService {
         await this.handlePaymentSucceeded(
           event.data.object as Stripe.PaymentIntent,
         );
+
         return { success: true };
 
       case 'payment_intent.payment_failed':
@@ -197,10 +198,10 @@ export class WebhooksService {
     const { paymentId, organizationId } = session.metadata || {};
     if (!paymentId) return { ignored: true };
 
-    await this.paymentService.update({
+    await this.paymentService.updateStatus({
       paymentId,
       status: PaymentStatus.EXPIRED,
-      failureReason: FailureReason.CHECKOUT_SESSION_EXPIRED,
+      failureReason: PaymentCancellationReason.CHECKOUT_SESSION_EXPIRED,
       organizationId,
     });
   }
@@ -210,10 +211,10 @@ export class WebhooksService {
     const organizationId = object.metadata?.organizationId;
     if (!paymentId) return { ignored: true };
 
-    await this.paymentService.update({
+    await this.paymentService.updateStatus({
       paymentId,
       status: PaymentStatus.CANCELLED,
-      failureReason: FailureReason.PAYMENT_CANCELED,
+      failureReason: PaymentCancellationReason.PAYMENT_CANCELED,
       organizationId,
     });
     return { success: true };
@@ -224,10 +225,10 @@ export class WebhooksService {
     const organizationId = object.metadata?.organizationId;
     if (!paymentId) return { ignored: true };
 
-    await this.paymentService.update({
+    await this.paymentService.updateStatus({
       paymentId,
       status: PaymentStatus.FAILED,
-      failureReason: FailureReason.PAYMENT_FAILED,
+      failureReason: PaymentCancellationReason.PAYMENT_FAILED,
       organizationId,
     });
     return { success: true };
@@ -238,7 +239,7 @@ export class WebhooksService {
     const organizationId = object.metadata?.organizationId;
     if (!paymentId) return { ignored: true };
 
-    await this.paymentService.update({
+    await this.paymentService.updateStatus({
       paymentId,
       status: PaymentStatus.COMPLETED,
       paidAt: new Date(),

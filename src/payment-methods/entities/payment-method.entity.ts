@@ -23,8 +23,8 @@ export class PaymentMethod {
   @Column()
   name: string;
 
-  @Column({ nullable: true })
-  description?: string;
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  icon?: string;
 
   @Column({ default: true })
   isActive: boolean;

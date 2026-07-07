@@ -30,6 +30,8 @@ import { PaymentService } from './payment.service';
 import { Payment } from './entities/payment.entity';
 import { PaymentStatus } from '../common/dto/payment-status.enum';
 import { STRIPE_CLIENT } from '../config/services';
+import { PaymentProviderFactory } from '../providers/payment-provider.factory';
+import { PaymentMethodsService } from '../payment-methods/payment-methods.service';
 
 const ORG_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const ORG_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
@@ -44,7 +46,7 @@ function matchesWhere(row: any, where: any): boolean {
   );
 }
 
-describe('PaymentService.update — IDOR & state-machine regression', () => {
+describe('PaymentService.updateStatus — IDOR & state-machine regression', () => {
   let service: PaymentService;
   let rows: any[];
 
@@ -96,6 +98,8 @@ describe('PaymentService.update — IDOR & state-machine regression', () => {
         PaymentService,
         { provide: getRepositoryToken(Payment), useValue: fakeRepo },
         { provide: STRIPE_CLIENT, useValue: {} },
+        { provide: PaymentProviderFactory, useValue: {} },
+        { provide: PaymentMethodsService, useValue: { findOne: jest.fn() } },
       ],
     }).compile();
 
@@ -107,7 +111,7 @@ describe('PaymentService.update — IDOR & state-machine regression', () => {
   // ─── cross-tenant guard ──────────────────────────────────────────────────
   it('rejects (forbidden) when payment org does not match dto org', async () => {
     await expect(
-      service.update({
+      service.updateStatus({
         paymentId: PAY_B_ID,
         organizationId: ORG_A,
         status: PaymentStatus.COMPLETED,
@@ -118,7 +122,7 @@ describe('PaymentService.update — IDOR & state-machine regression', () => {
 
   // ─── idempotency guard ───────────────────────────────────────────────────
   it('returns the payment unchanged without calling update when status is already the same', async () => {
-    const result = await service.update({
+    const result = await service.updateStatus({
       paymentId: PAY_A_ID,
       organizationId: ORG_A,
       status: PaymentStatus.PENDING,
@@ -130,7 +134,7 @@ describe('PaymentService.update — IDOR & state-machine regression', () => {
   // ─── finalized guard ─────────────────────────────────────────────────────
   it('rejects when attempting to change status of a COMPLETED payment', async () => {
     await expect(
-      service.update({
+      service.updateStatus({
         paymentId: PAY_COMP_ID,
         organizationId: ORG_A,
         status: PaymentStatus.PENDING,
@@ -149,7 +153,7 @@ describe('PaymentService.update — IDOR & state-machine regression', () => {
       amount: 500,
     });
     await expect(
-      service.update({
+      service.updateStatus({
         paymentId: failedId,
         organizationId: ORG_A,
         status: PaymentStatus.PENDING,
@@ -160,7 +164,7 @@ describe('PaymentService.update — IDOR & state-machine regression', () => {
 
   // ─── happy path ──────────────────────────────────────────────────────────
   it('calls update once when transitioning PENDING → COMPLETED for the correct org', async () => {
-    await service.update({
+    await service.updateStatus({
       paymentId: PAY_A_ID,
       organizationId: ORG_A,
       status: PaymentStatus.COMPLETED,

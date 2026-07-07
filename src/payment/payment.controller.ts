@@ -1,14 +1,18 @@
-import { Controller } from '@nestjs/common';
-import { MessagePattern, Payload } from '@nestjs/microservices';
+import { Controller, Logger } from '@nestjs/common';
+import { EventPattern, MessagePattern, Payload } from '@nestjs/microservices';
 import { PaymentService } from './payment.service';
 import { PAYMENT_PATTERNS } from './patterns/payment_patterns';
 import { CreatePaymentSessionDto } from './dto/create-payment-session.dto';
 import { PaymentsPaginationDto } from './dto/payments-pagination.dto';
 import { CancelPaymentDto } from './dto/cancel-payment.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+import { UpdatePaymentDto } from './dto/update-payment.dto';
+import { ORDER_PATTERNS } from 'src/webhooks/patterns/order-patterns';
 
 @Controller()
 export class PaymentController {
+  private readonly logger = new Logger(PaymentController.name);
+
   constructor(private readonly service: PaymentService) {}
 
   @MessagePattern(PAYMENT_PATTERNS.CREATE_PAYMENT_SESSION)
@@ -18,6 +22,7 @@ export class PaymentController {
 
   @MessagePattern(PAYMENT_PATTERNS.CREATE)
   createPayment(@Payload() data: CreatePaymentDto) {
+    console.log(data);
     return this.service.create(data);
   }
 
@@ -46,5 +51,29 @@ export class PaymentController {
   @MessagePattern(PAYMENT_PATTERNS.CANCEL)
   cancel(@Payload() dto: CancelPaymentDto) {
     return this.service.cancel(dto);
+  }
+
+  @MessagePattern(PAYMENT_PATTERNS.UPDATE)
+  update(@Payload() dto: UpdatePaymentDto) {
+    return this.service.update(dto);
+  }
+
+  // Consumed from the payments event queue (rabbitmqPaymentEventQueue).
+  // Emitted by orders-ms when an order transitions to CANCELLED.
+  @EventPattern(ORDER_PATTERNS.ORDER_CANCELLED)
+  async onOrderCancelled(
+    @Payload() data: { orderId: string; organizationId: string },
+  ) {
+
+    console.log(`Received ORDER_CANCELLED event for orderId=${data?.orderId}, organizationId=${data?.organizationId}`,
+    );    
+    try {
+      await this.service.cancelOrderPayments(data);
+    } catch (error) {
+      // Log and swallow — a failure here must not crash the RabbitMQ consumer.
+      this.logger.error(
+        `order.cancelled: failed to cancel payments for orderId=${data?.orderId}: ${error?.message}`,
+      );
+    }
   }
 }

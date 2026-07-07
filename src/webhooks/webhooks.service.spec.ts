@@ -53,7 +53,7 @@ describe('WebhooksService.handleEvent — idempotency regression', () => {
   let service: WebhooksService;
   let module: TestingModule;
   let mockRedis: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
-  let mockPaymentService: { update: jest.Mock; findOneBy: jest.Mock };
+  let mockPaymentService: { updateStatus: jest.Mock; findOneBy: jest.Mock };
 
   beforeEach(async () => {
     mockRedis = {
@@ -62,7 +62,7 @@ describe('WebhooksService.handleEvent — idempotency regression', () => {
       del: jest.fn(),
     };
     mockPaymentService = {
-      update: jest.fn(),
+      updateStatus: jest.fn(),
       findOneBy: jest.fn(),
     };
 
@@ -159,7 +159,7 @@ describe('WebhooksService.handleEvent — idempotency regression', () => {
     mockRedis.get.mockResolvedValueOnce(null);
     mockRedis.set.mockResolvedValueOnce('OK'); // lock acquired
     mockRedis.del.mockResolvedValueOnce(1);    // lock released in finally
-    mockPaymentService.update.mockRejectedValueOnce(new Error('db error'));
+    mockPaymentService.updateStatus.mockRejectedValueOnce(new Error('db error'));
 
     await expect(service.handleEvent(failingPayload)).rejects.toThrow('db error');
     expect(mockRedis.del).toHaveBeenCalledTimes(1);

@@ -6,6 +6,7 @@ export const PAYMENT_PATTERNS = {
   FIND_ALL: 'payment.find_all',
   FIND_MY: 'payment.find_my',
   FIND_MY_BY_ID: 'payment.find_my_by_id',
+  UPDATE: 'payment.update',
   CANCEL: 'payment.cancel',
 
   

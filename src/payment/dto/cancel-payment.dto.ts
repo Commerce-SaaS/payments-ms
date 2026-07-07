@@ -1,5 +1,5 @@
-import { IsEnum, IsString, IsUUID } from 'class-validator';
-import { FailureReason } from '../enums/payment-failure-reason.enum';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { PaymentCancellationReason } from '../enums/payment-cancellation-reason.enum';
 
 export class CancelPaymentDto {
   @IsUUID()
@@ -8,6 +8,7 @@ export class CancelPaymentDto {
   @IsUUID()
   organizationId: string;
 
-  @IsEnum(FailureReason)
-  failureReason: FailureReason;
+  @IsOptional()
+  @IsEnum(PaymentCancellationReason)
+  failureReason?: PaymentCancellationReason;
 }

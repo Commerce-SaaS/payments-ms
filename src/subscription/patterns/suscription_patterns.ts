@@ -9,4 +9,6 @@ export const SUBSCRIPTION_PATTERNS = {
   CHANGE_PLAN: 'subscription.change_plan',
   CANCEL: 'subscription.cancel',
   RESUME: 'subscription.resume',
+  // Event received from auth-ms when a customer has been anonymized
+  CUSTOMER_ANONYMIZED: 'customer.anonymized',
 } as const;

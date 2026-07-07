@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import Stripe from 'stripe';
@@ -20,6 +20,8 @@ import { InvoiceHistoryItemDto } from './dto/invoice-history-items.dto';
 
 @Injectable()
 export class SubscriptionService {
+  private readonly logger = new Logger(SubscriptionService.name);
+
   constructor(
     @InjectRepository(Subscription)
     private readonly subscriptionRepository: Repository<Subscription>,
@@ -122,7 +124,7 @@ export class SubscriptionService {
       },
     });
 
-    await this.paymentService.update({
+    await this.paymentService.updateStatus({
       paymentId: payment.id,
       externalSessionId: session.externalSessionId ?? '',
       checkoutUrl: session.checkoutUrl,
@@ -390,5 +392,22 @@ export class SubscriptionService {
       subscription.currentPeriodEnd != null &&
       subscription.currentPeriodEnd > now
     );
+  }
+
+  // Called when auth-ms emits customer.anonymized.
+  // Nulls userId so the subscription row can no longer be linked back to the
+  // customer. PostgreSQL allows multiple NULLs in a unique index, so this is
+  // safe for multiple anonymized customers.
+  // Safe to call multiple times: second call matches zero rows and is a no-op.
+  async anonymizeCustomerSubscription(userId: string): Promise<number> {
+    const result = await this.subscriptionRepository.update(
+      { userId },
+      { userId: null },
+    );
+    const affected = result.affected ?? 0;
+    this.logger.log(
+      `customer.anonymized: nulled userId on ${affected} subscription(s) for userId=${userId}`,
+    );
+    return affected;
   }
 }

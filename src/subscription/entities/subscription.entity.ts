@@ -15,8 +15,13 @@ export class Subscription {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
-  userId: string;
+  // nullable so we can null it when the customer is anonymized.
+  // PostgreSQL allows multiple NULLs in a unique index, so this is safe.
+  // Requires a migration: ALTER TABLE subscription ALTER COLUMN user_id DROP NOT NULL;
+  // type: 'varchar' is explicit because TypeORM cannot infer the column type from
+  // the `string | null` union — without it the driver reports "Data type 'Object'".
+  @Column({ type: 'varchar', nullable: true })
+  userId: string | null;
 
   @Column({
     type: 'enum',

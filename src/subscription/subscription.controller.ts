@@ -1,13 +1,19 @@
-import { Controller } from '@nestjs/common';
-import { MessagePattern, Payload } from '@nestjs/microservices';
+import { Controller, Logger } from '@nestjs/common';
+import { EventPattern, MessagePattern, Payload } from '@nestjs/microservices';
 import { SubscriptionService } from './subscription.service';
+import { PaymentService } from 'src/payment/payment.service';
 import { SubscriptionPlan } from './enums/subscription-plan.enum';
 import { SUBSCRIPTION_PATTERNS } from './patterns/suscription_patterns';
 import { CreateOnboardingSubscriptionSessionDto } from './dto/create-onboarding-subscription-session.dto';
 
 @Controller()
 export class SubscriptionController {
-  constructor(private readonly service: SubscriptionService) {}
+  private readonly logger = new Logger(SubscriptionController.name);
+
+  constructor(
+    private readonly service: SubscriptionService,
+    private readonly paymentService: PaymentService,
+  ) {}
 
   @MessagePattern(SUBSCRIPTION_PATTERNS.GET_PLANS)
   getPlans() {
@@ -46,5 +52,23 @@ export class SubscriptionController {
   @MessagePattern(SUBSCRIPTION_PATTERNS.RESUME)
   resume(@Payload() data: { id: string; userId: string }) {
     return this.service.resume(data.id, data.userId);
+  }
+
+  // Received from auth-ms after a customer is anonymized.
+  // Handles both Payment and Subscription tables in one handler since
+  // SubscriptionModule already imports the global PaymentModule.
+  @EventPattern(SUBSCRIPTION_PATTERNS.CUSTOMER_ANONYMIZED)
+  async onCustomerAnonymized(@Payload() data: { userId: string }) {
+    try {
+      await Promise.all([
+        this.service.anonymizeCustomerSubscription(data.userId),
+        this.paymentService.anonymizeCustomerPayments(data.userId),
+      ]);
+    } catch (error) {
+      // Log and swallow — a failure here must not crash the RabbitMQ consumer.
+      this.logger.error(
+        `customer.anonymized: failed for userId=${data.userId}: ${error?.message}`,
+      );
+    }
   }
 }

@@ -18,8 +18,8 @@ export class CreatePaymentMethodDto {
 
   @IsOptional()
   @IsString()
-  @Length(0, 200)
-  description?: string;
+  @Length(0, 100)
+  icon?: string;
 
   @IsOptional()
   @IsBoolean()
