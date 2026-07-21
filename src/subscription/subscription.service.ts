@@ -254,13 +254,24 @@ export class SubscriptionService {
     const isUpgrade = this.PLAN_RANK[plan] > this.PLAN_RANK[subscription.plan];
 
     if (isUpgrade) {
-      // UPGRADE
+      // UPGRADE: effective immediately in Stripe (proration_behavior:
+      // 'always_invoice'), so it's correct to persist the new plan locally
+      // right away rather than waiting for customer.subscription.updated.
       await this.applyImmediateUpgrade(
         subscription.stripeSubscriptionId,
         newPriceId,
       );
+      subscription.plan = plan;
+      return this.subscriptionRepository.save(subscription);
     } else {
-      // DOWNGRADE
+      // DOWNGRADE: deferred to period end via a Stripe subscription schedule
+      // — the new plan is NOT active yet, so subscription.plan must stay
+      // unchanged here. There is no pendingPlan/scheduledPlan field on the
+      // entity to record the scheduled plan, so this branch still relies
+      // entirely on customer.subscription.updated to reflect the change once
+      // it actually takes effect. TODO(follow-up): add a pending-plan field
+      // if we want GET /subscription/me to reflect a scheduled downgrade
+      // before it lands (see ISSUES.md, Issue 1).
       await this.scheduleDowngradeAtPeriodEnd(
         subscription.stripeSubscriptionId,
         newPriceId,

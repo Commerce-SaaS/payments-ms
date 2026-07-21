@@ -15,6 +15,8 @@ import { PaymentProviderFactory } from '../providers/payment-provider.factory';
 import { STRIPE_CLIENT } from 'src/config/services';
 import { PaymentProvider } from './enums/payment-provider.enum';
 import { CancelPaymentDto } from './dto/cancel-payment.dto';
+import { PaymentTotalsByMethodDto } from './dto/payment-totals-by-method.dto';
+import { PaymentTotalsByMethodRangeDto } from './dto/payment-totals-by-method-range.dto';
 import { PaymentMethod } from 'src/payment-methods/entities/payment-method.entity';
 import { PaymentMethodsService } from 'src/payment-methods/payment-methods.service';
 import { PaymentCancellationReason } from './enums/payment-cancellation-reason.enum';
@@ -31,14 +33,18 @@ export class PaymentService {
   constructor(
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
+    @InjectRepository(PaymentMethod)
+    private readonly paymentMethodRepository: Repository<PaymentMethod>,
     private readonly providerFactory: PaymentProviderFactory,
     private readonly paymentMethodsService: PaymentMethodsService,
   ) { }
 
   async create(dto: CreatePaymentDto) {
     try {
+      const { paidAt, ...rest } = dto;
       const payment = this.paymentRepository.create({
-        ...dto,
+        ...rest,
+        ...(paidAt ? { paidAt: new Date(paidAt) } : {}),
       });
       return await this.paymentRepository.save(payment);
     } catch (error) {
@@ -147,6 +153,7 @@ export class PaymentService {
       organizationId,
       provider,
       orderId,
+      cashSessionId,
       lineItems,
       userId,
       stripeAccountId,
@@ -164,6 +171,7 @@ export class PaymentService {
     const payment = await this.paymentRepository.save({
       organizationId,
       orderId,
+      cashSessionId,
       provider,
       amount,
       userId,
@@ -333,6 +341,169 @@ export class PaymentService {
       paidAt: payment.paidAt ?? null,
       cancelledAt: payment.cancelledAt ?? null,
       createdAt: payment.createdAt,
+    };
+  }
+
+  // Used by client-gateway to build the cash-session ticket Z report — sums
+  // payments by cashSessionId (Payment.cashSessionId, inherited from Order at
+  // creation time), grouped by payment method for completed/paid payments,
+  // plus cancelled/refunded breakdowns for the pre-close summary.
+  async totalsByMethod(dto: PaymentTotalsByMethodDto) {
+    const { organizationId, cashSessionId } = dto;
+
+    console.log(cashSessionId);
+    const rows = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .select('payment.paymentMethodId', 'paymentMethodId')
+      .addSelect('payment.paymentMethodName', 'paymentMethodName')
+      .addSelect('SUM(payment.amount)', 'totalAmount')
+      .addSelect('COUNT(payment.id)', 'paymentCount')
+      .where('payment.organizationId = :organizationId', { organizationId })
+      .andWhere('payment.cashSessionId = :cashSessionId', { cashSessionId })
+      .andWhere('payment.status IN (:...statuses)', {
+        statuses: [PaymentStatus.COMPLETED, PaymentStatus.PAID],
+      })
+      .groupBy('payment.paymentMethodId')
+      .addGroupBy('payment.paymentMethodName')
+      .getRawMany<{
+        paymentMethodId: string | null;
+        paymentMethodName: string | null;
+        totalAmount: string;
+        paymentCount: string;
+      }>();
+
+    const totals = await this.classifyRowsByCash(rows);
+
+    // Payments with no paymentMethodId (legacy data) can't be classified as
+    // cash or not — surfaced separately so a cash discrepancy isn't blamed on
+    // the cashier when the real cause is unclassified payments.
+    const unclassified = totals.filter((t) => t.paymentMethodId === null);
+    const unclassifiedTotal = unclassified.reduce((sum, t) => sum + t.totalAmount, 0);
+    const unclassifiedCount = unclassified.reduce((sum, t) => sum + t.paymentCount, 0);
+
+    const hasCashMethodConfigured =
+      (await this.paymentMethodRepository.count({
+        where: { organizationId, isCash: true },
+      })) > 0;
+
+    // Same grouped-aggregate query as `totals` above, just filtered to a
+    // different status — needed for the pre-close summary so the cashier can
+    // see cancellations/refunds alongside the cash breakdown before confirming.
+    const { total: cancelledTotal, count: cancelledCount } = await this.sumByStatus(
+      organizationId,
+      cashSessionId,
+      PaymentStatus.CANCELLED,
+    );
+    const { total: refundedTotal, count: refundedCount } = await this.sumByStatus(
+      organizationId,
+      cashSessionId,
+      PaymentStatus.REFUNDED,
+    );
+
+    return {
+      totals,
+      grandTotal: totals.reduce((sum, t) => sum + t.totalAmount, 0),
+      totalPayments: totals.reduce((sum, t) => sum + t.paymentCount, 0),
+      cashTotal: totals.filter((t) => t.isCash).reduce((sum, t) => sum + t.totalAmount, 0),
+      unclassifiedTotal,
+      unclassifiedCount,
+      hasCashMethodConfigured,
+      cancelledTotal,
+      cancelledCount,
+      refundedTotal,
+      refundedCount,
+    };
+  }
+
+  private async sumByStatus(
+    organizationId: string,
+    cashSessionId: string,
+    status: PaymentStatus,
+  ): Promise<{ total: number; count: number }> {
+    const row = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .select('SUM(payment.amount)', 'total')
+      .addSelect('COUNT(payment.id)', 'count')
+      .where('payment.organizationId = :organizationId', { organizationId })
+      .andWhere('payment.cashSessionId = :cashSessionId', { cashSessionId })
+      .andWhere('payment.status = :status', { status })
+      .getRawOne<{ total: string | null; count: string }>();
+
+    return { total: Number(row?.total ?? 0), count: Number(row?.count ?? 0) };
+  }
+
+  // Shared by totalsByMethod (cash-session scoped) and totalsByMethodRange
+  // (date-range scoped) — resolves isCash by cross-referencing
+  // PaymentMethod.isCash (withDeleted: true, see totalsByMethod's note on
+  // historical soft-deleted methods) rather than trusting a column on
+  // Payment itself, since isCash never lived there.
+  private async classifyRowsByCash(
+    rows: {
+      paymentMethodId: string | null;
+      paymentMethodName: string | null;
+      totalAmount: string;
+      paymentCount: string;
+    }[],
+  ): Promise<
+    {
+      paymentMethodId: string | null;
+      paymentMethodName: string;
+      isCash: boolean;
+      totalAmount: number;
+      paymentCount: number;
+    }[]
+  > {
+    const methodIds = rows.map((r) => r.paymentMethodId).filter((id): id is string => !!id);
+    const cashMethods = methodIds.length
+      ? await this.paymentMethodRepository.find({
+          where: { id: In(methodIds), isCash: true },
+          withDeleted: true,
+        })
+      : [];
+    const cashMethodIds = new Set(cashMethods.map((m) => m.id));
+
+    return rows.map((row) => ({
+      paymentMethodId: row.paymentMethodId ?? null,
+      paymentMethodName: row.paymentMethodName ?? 'Unknown',
+      isCash: row.paymentMethodId ? cashMethodIds.has(row.paymentMethodId) : false,
+      totalAmount: Number(row.totalAmount),
+      paymentCount: Number(row.paymentCount),
+    }));
+  }
+
+  // Sibling of totalsByMethod, scoped by organizationId + createdAt range
+  // instead of cashSessionId — used by client-gateway's analytics aggregator
+  // for the payment-method breakdown (payment.totals_by_method_range).
+  async totalsByMethodRange(dto: PaymentTotalsByMethodRangeDto) {
+    const { organizationId, from, to } = dto;
+
+    const rows = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .select('payment.paymentMethodId', 'paymentMethodId')
+      .addSelect('payment.paymentMethodName', 'paymentMethodName')
+      .addSelect('SUM(payment.amount)', 'totalAmount')
+      .addSelect('COUNT(payment.id)', 'paymentCount')
+      .where('payment.organizationId = :organizationId', { organizationId })
+      .andWhere('payment.createdAt BETWEEN :from AND :to', { from, to })
+      .andWhere('payment.status IN (:...statuses)', {
+        statuses: [PaymentStatus.COMPLETED, PaymentStatus.PAID],
+      })
+      .groupBy('payment.paymentMethodId')
+      .addGroupBy('payment.paymentMethodName')
+      .getRawMany<{
+        paymentMethodId: string | null;
+        paymentMethodName: string | null;
+        totalAmount: string;
+        paymentCount: string;
+      }>();
+
+    const totals = await this.classifyRowsByCash(rows);
+
+    return {
+      totals,
+      grandTotal: totals.reduce((sum, t) => sum + t.totalAmount, 0),
+      totalPayments: totals.reduce((sum, t) => sum + t.paymentCount, 0),
+      cashTotal: totals.filter((t) => t.isCash).reduce((sum, t) => sum + t.totalAmount, 0),
     };
   }
 

@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { WebhookEvent } from './types/webhook-events.types';
+import { WebhookOrigin } from './enums/webhook-origin.enum';
 import { PaymentProvider } from 'src/payment/enums/payment-provider.enum';
 import Stripe from 'stripe';
 import { PaymentStatus } from 'src/common/dto/payment-status.enum';
@@ -47,7 +48,7 @@ export class WebhooksService {
     if (locked !== 'OK') return { inProgress: true };
 
     try {
-      const result = await this.processEvent(event);
+      const result = await this.processEvent(event, payload.webhookType);
       await this.redis.set(doneKey, '1', 'EX', this.EVENT_TTL);
       return result;
     } finally {
@@ -55,7 +56,7 @@ export class WebhooksService {
     }
   }
 
-  private async processEvent(event: Stripe.Event) {
+  private async processEvent(event: Stripe.Event, webhookType?: WebhookOrigin) {
     switch (event.type) {
       case 'checkout.session.completed':
         await this.handleCheckoutCompleted(
@@ -129,6 +130,11 @@ export class WebhooksService {
         return { externalAccountRemoved: true };
 
       default:
+        // Legitimate-but-unhandled events left no trace before this — keep
+        // the ignore behavior unchanged, just make it observable.
+        this.logger.warn(
+          `Unhandled Stripe event type "${event.type}" (eventId=${event.id}, webhookType=${webhookType ?? 'unknown'}) — ignored`,
+        );
         return { ignored: true };
     }
   }

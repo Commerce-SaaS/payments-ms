@@ -35,6 +35,12 @@ export class PaymentMethod {
   @Column({ default: false })
   isSystem: boolean;
 
+  // Marks this method as "cash" for cash-session (ticket Z) reporting — used
+  // by payment.totalsByMethod to compute CashSession.expectedCash. There is no
+  // other reliable discriminator since `name` is free text per organization.
+  @Column({ default: false })
+  isCash: boolean;
+
   @Column({ default: 0 })
   sortOrder: number;
 
@@ -47,3 +53,7 @@ export class PaymentMethod {
   @UpdateDateColumn()
   updatedAt: Date;
 }
+
+// PROD MIGRATION NOTE (TypeORM synchronize handles dev automatically; do NOT
+// run synchronize in production):
+//   ALTER TABLE "payment_method" ADD COLUMN "isCash" boolean NOT NULL DEFAULT false;

@@ -7,6 +7,8 @@ import { PaymentsPaginationDto } from './dto/payments-pagination.dto';
 import { CancelPaymentDto } from './dto/cancel-payment.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
+import { PaymentTotalsByMethodDto } from './dto/payment-totals-by-method.dto';
+import { PaymentTotalsByMethodRangeDto } from './dto/payment-totals-by-method-range.dto';
 import { ORDER_PATTERNS } from 'src/webhooks/patterns/order-patterns';
 
 @Controller()
@@ -22,7 +24,6 @@ export class PaymentController {
 
   @MessagePattern(PAYMENT_PATTERNS.CREATE)
   createPayment(@Payload() data: CreatePaymentDto) {
-    console.log(data);
     return this.service.create(data);
   }
 
@@ -56,6 +57,16 @@ export class PaymentController {
   @MessagePattern(PAYMENT_PATTERNS.UPDATE)
   update(@Payload() dto: UpdatePaymentDto) {
     return this.service.update(dto);
+  }
+
+  @MessagePattern(PAYMENT_PATTERNS.TOTALS_BY_METHOD)
+  totalsByMethod(@Payload() dto: PaymentTotalsByMethodDto) {
+    return this.service.totalsByMethod(dto);
+  }
+
+  @MessagePattern(PAYMENT_PATTERNS.TOTALS_BY_METHOD_RANGE)
+  totalsByMethodRange(@Payload() dto: PaymentTotalsByMethodRangeDto) {
+    return this.service.totalsByMethodRange(dto);
   }
 
   // Consumed from the payments event queue (rabbitmqPaymentEventQueue).

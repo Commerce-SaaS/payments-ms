@@ -28,6 +28,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { PaymentService } from './payment.service';
 import { Payment } from './entities/payment.entity';
+import { PaymentMethod } from '../payment-methods/entities/payment-method.entity';
 import { PaymentStatus } from '../common/dto/payment-status.enum';
 import { STRIPE_CLIENT } from '../config/services';
 import { PaymentProviderFactory } from '../providers/payment-provider.factory';
@@ -51,6 +52,17 @@ describe('PaymentService.updateStatus — IDOR & state-machine regression', () =
   let rows: any[];
 
   const fakeRepo = {
+    findOneBy: jest.fn(),
+    update: jest.fn(),
+    save: jest.fn(),
+    create: jest.fn(),
+    findOne: jest.fn(),
+  };
+
+  // Not exercised by these tests (PaymentService only reads Payment rows
+  // here), but PaymentService's constructor injects it directly, so
+  // Test.createTestingModule needs the token provided regardless.
+  const fakePaymentMethodRepo = {
     findOneBy: jest.fn(),
     update: jest.fn(),
     save: jest.fn(),
@@ -97,6 +109,7 @@ describe('PaymentService.updateStatus — IDOR & state-machine regression', () =
       providers: [
         PaymentService,
         { provide: getRepositoryToken(Payment), useValue: fakeRepo },
+        { provide: getRepositoryToken(PaymentMethod), useValue: fakePaymentMethodRepo },
         { provide: STRIPE_CLIENT, useValue: {} },
         { provide: PaymentProviderFactory, useValue: {} },
         { provide: PaymentMethodsService, useValue: { findOne: jest.fn() } },

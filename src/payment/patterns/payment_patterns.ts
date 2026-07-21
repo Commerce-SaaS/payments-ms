@@ -8,6 +8,8 @@ export const PAYMENT_PATTERNS = {
   FIND_MY_BY_ID: 'payment.find_my_by_id',
   UPDATE: 'payment.update',
   CANCEL: 'payment.cancel',
+  TOTALS_BY_METHOD: 'payment.totals_by_method',
+  TOTALS_BY_METHOD_RANGE: 'payment.totals_by_method_range',
 
   
   WEB_HOOK_STRIPE: 'payment.webhook.stripe',

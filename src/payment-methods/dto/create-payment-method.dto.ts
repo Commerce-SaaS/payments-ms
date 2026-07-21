@@ -30,6 +30,10 @@ export class CreatePaymentMethodDto {
   isDefault?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  isCash?: boolean;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   sortOrder?: number;

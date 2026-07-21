@@ -18,6 +18,7 @@ import { PaymentCancellationReason } from '../enums/payment-cancellation-reason.
 @Index(['organizationId', 'status'])
 @Index(['organizationId', 'createdAt'])
 @Index(['organizationId', 'provider'])
+@Index(['cashSessionId'])
 export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -30,6 +31,14 @@ export class Payment {
 
   @Column({ nullable: true })
   subscriptionId?: string;
+
+  // Inherited from the Order at creation time (never re-resolved), NOT the
+  // cash session open when the payment settles — client-gateway resolves
+  // this by reading Order.cashSessionId before calling payments-ms. null for
+  // payments with no orderId (e.g. subscription payments), since there's
+  // nothing to inherit from.
+  @Column({ type: 'uuid', nullable: true })
+  cashSessionId?: string | null;
 
   // type: 'varchar' is explicit because TypeORM cannot infer the column type from
   // the `string | null` union — without it the driver reports "Data type 'Object'".
@@ -96,3 +105,8 @@ export class Payment {
   @UpdateDateColumn()
   updatedAt: Date;
 }
+
+// PROD MIGRATION NOTE (TypeORM synchronize handles dev automatically; do NOT
+// run synchronize in production):
+//   ALTER TABLE "payment" ADD COLUMN "cashSessionId" uuid;
+//   CREATE INDEX "IDX_payment_cashSessionId" ON "payment" ("cashSessionId");
