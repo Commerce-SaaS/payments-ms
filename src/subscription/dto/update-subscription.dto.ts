@@ -2,7 +2,7 @@ import { PartialType } from '@nestjs/mapped-types';
 import { CreateSubscriptionDto } from './create-subscription.dto';
 import { SubscriptionPlan } from '../enums/subscription-plan.enum';
 import { SubscriptionStatus } from '../enums/subscription-status.enum';
-import { IsEnum, IsOptional, IsDate, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsDate, IsString, IsBoolean, IsInt, IsPositive } from 'class-validator';
 
 export class UpdateSubscriptionDto extends PartialType(CreateSubscriptionDto) {
   @IsOptional()
@@ -24,4 +24,21 @@ export class UpdateSubscriptionDto extends PartialType(CreateSubscriptionDto) {
   @IsOptional()
   @IsDate()
   currentPeriodEnd?: Date;
+
+  @IsOptional()
+  @IsBoolean()
+  cancelAtPeriodEnd?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  priceAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  stripePriceId?: string;
 }

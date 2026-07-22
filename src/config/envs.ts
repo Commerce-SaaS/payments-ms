@@ -14,11 +14,16 @@ const envSchema = z
       message: 'RABBITMQ_URL must start with amqp:// or amqps://',
     }),
     RABBITMQ_QUEUE: z.string().min(1, 'RABBITMQ_QUEUE cannot be empty'),
+    RABBITMQ_QUEUE_EVENTS_ORDERS: z.string().min(1, 'RABBITMQ_QUEUE_EVENTS_ORDERS cannot be empty'),
     RABBITMQ_QUEUE_EVENTS_PAYMENTS: z.string().min(1, 'RABBITMQ_QUEUE_EVENTS_PAYMENTS cannot be empty'),
+    RABBITMQ_QUEUE_EVENTS_ORGANIZATION: z.string().min(1, 'RABBITMQ_QUEUE_EVENTS_ORGANIZATION cannot be empty'),
     CLIENT_URL: z.string().url('CLIENT_URL must be a valid URL'),
     STRIPE_SECRET: z.string().min(1, 'STRIPE_SECRET cannot be empty'),
     REDIS_HOST: z.string(),
     REDIS_PORT: z.coerce.number().default(6379),
+    REDIS_PASS: z.string(),
+    STRIPE_PRICE_ID_BASIC: z.string().min(1, 'STRIPE_PRICE_ID_BASIC cannot be empty'),
+    STRIPE_PRICE_ID_PRO: z.string().min(1, 'STRIPE_PRICE_ID_PRO cannot be empty'),
   })
   .required();
 
@@ -42,9 +47,14 @@ export const envs = {
   postgresDb: parsedEnv.data.POSTGRES_DB,
   rabbitmqUrl: parsedEnv.data.RABBITMQ_URL,
   rabbitmqQueue: parsedEnv.data.RABBITMQ_QUEUE,
+  rabbitmqOrdersEventQueue: parsedEnv.data.RABBITMQ_QUEUE_EVENTS_ORDERS,
   rabbitmqPaymentEventQueue: parsedEnv.data.RABBITMQ_QUEUE_EVENTS_PAYMENTS,
   clientUrl: parsedEnv.data.CLIENT_URL,
   stripeSecret: parsedEnv.data.STRIPE_SECRET,
   redisHost: parsedEnv.data.REDIS_HOST,
   redisPort: parsedEnv.data.REDIS_PORT,
+  redisPass: parsedEnv.data.REDIS_PASS,
+  rabbitmqOrganizationQueue: parsedEnv.data.RABBITMQ_QUEUE_EVENTS_ORGANIZATION,
+  stripePriceIdBasic: parsedEnv.data.STRIPE_PRICE_ID_BASIC,
+  stripePriceIdPro: parsedEnv.data.STRIPE_PRICE_ID_PRO,
 };

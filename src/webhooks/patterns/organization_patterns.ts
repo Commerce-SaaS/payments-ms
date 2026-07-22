@@ -5,5 +5,6 @@ export const ORGANIZATION_PATTERNS = {
     UPDATE: "organization.update",
     UPDATE_EVENT: "organization.update_event",
     DELETE: "organization.delete",
-    RESTORE: "organization.restore"
+    RESTORE: "organization.restore",
+    CLEAR_STRIPE_ACCOUNT: 'organization.stripe.clear',
 } as const;

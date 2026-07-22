@@ -9,7 +9,12 @@ export class AccessController {
   constructor(private readonly service: AccessService) {}
 
   @MessagePattern(ACCESS_PATTERNS.CHECK)
-  async check(data: { organizationId: string }) {
-    return this.service.checkAccess(data.organizationId);
+  async check(data: { userId: string }) {
+    return this.service.checkAccess(data.userId);
+  }
+
+  @MessagePattern(ACCESS_PATTERNS.CHECK_ONBOARDING)
+  async checkOnboarding(data: { userId: string }) {
+    return this.service.checkOnboarding(data.userId);
   }
 }

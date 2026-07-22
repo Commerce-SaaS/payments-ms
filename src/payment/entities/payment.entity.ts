@@ -6,20 +6,25 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
-import { PaymentStatus } from '../enums/payment-status.enum';
+import { PaymentStatus } from '../../common/dto/payment-status.enum';
 import { PaymentProvider } from '../enums/payment-provider.enum';
+import { PaymentCancellationReason } from '../enums/payment-cancellation-reason.enum';
 
 @Entity()
 @Index(['orderId'])
 @Index(['subscriptionId'])
 @Index(['externalPaymentId'])
 @Index(['externalSessionId'])
+@Index(['organizationId', 'status'])
+@Index(['organizationId', 'createdAt'])
+@Index(['organizationId', 'provider'])
+@Index(['cashSessionId'])
 export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
-  organizationId: string;
+  @Column({ nullable: true })
+  organizationId?: string;
 
   @Column({ nullable: true })
   orderId?: string;
@@ -27,8 +32,18 @@ export class Payment {
   @Column({ nullable: true })
   subscriptionId?: string;
 
-  @Column({ nullable: true })
-  userId?: string;
+  // Inherited from the Order at creation time (never re-resolved), NOT the
+  // cash session open when the payment settles — client-gateway resolves
+  // this by reading Order.cashSessionId before calling payments-ms. null for
+  // payments with no orderId (e.g. subscription payments), since there's
+  // nothing to inherit from.
+  @Column({ type: 'uuid', nullable: true })
+  cashSessionId?: string | null;
+
+  // type: 'varchar' is explicit because TypeORM cannot infer the column type from
+  // the `string | null` union — without it the driver reports "Data type 'Object'".
+  @Column({ type: 'varchar', nullable: true })
+  userId?: string | null;
 
   @Column({ type: 'int' })
   amount: number;
@@ -46,29 +61,43 @@ export class Payment {
   @Column({
     type: 'enum',
     enum: PaymentProvider,
+    nullable: true,
   })
-  provider: PaymentProvider;
+  provider: PaymentProvider | null;
 
-  // 🔹 ID del pago en el proveedor
+  @Column({ nullable: true })
+  paymentMethodId?: string;
+
+  @Column({ nullable: true })
+  paymentMethodName?: string;
+
   @Column({ nullable: true })
   externalPaymentId?: string;
 
-  // 🔹 ID de sesión (si el proveedor usa sesiones)
   @Column({ nullable: true })
   externalSessionId?: string;
 
-  // 🔹 Datos extra específicos del proveedor
   @Column({ type: 'json', nullable: true })
-  providerMetadata?: Record<string, any>;
+  providerMetadata?: Record<string, any> | null;
 
   @Column({ nullable: true })
   checkoutUrl?: string;
 
-  @Column({ nullable: true })
-  failureReason?: string;
+  @Column({
+    type: 'enum',
+    enum: PaymentCancellationReason,
+    // enumName locks the Postgres type to the existing name so the prod migration
+    // is only two ADD VALUE statements rather than a drop-and-recreate.
+    enumName: 'payment_failurereason_enum',
+    nullable: true,
+  })
+  failureReason?: PaymentCancellationReason;
 
   @Column({ type: 'timestamp', nullable: true })
   paidAt?: Date;
+
+  @Column({ type: 'timestamp', nullable: true })
+  cancelledAt?: Date;
 
   @CreateDateColumn()
   createdAt: Date;
@@ -76,3 +105,8 @@ export class Payment {
   @UpdateDateColumn()
   updatedAt: Date;
 }
+
+// PROD MIGRATION NOTE (TypeORM synchronize handles dev automatically; do NOT
+// run synchronize in production):
+//   ALTER TABLE "payment" ADD COLUMN "cashSessionId" uuid;
+//   CREATE INDEX "IDX_payment_cashSessionId" ON "payment" ("cashSessionId");

@@ -1,47 +1,16 @@
-import {
-  IsUUID,
-  IsOptional,
-  IsNumber,
-  IsEnum,
-  IsString,
-  IsDate,
-} from 'class-validator';
-import { PaymentStatus } from '../enums/payment-status.enum';
+import { IsUUID } from 'class-validator';
 
+// Client-facing PATCH /payments/:id contract. Intentionally narrow: this
+// endpoint only reassigns which payment method a payment is attributed to —
+// amount, status, order, currency, etc. are not editable through it.
 export class UpdatePaymentDto {
-  @IsOptional()
-  @IsEnum(PaymentStatus)
-  status?: PaymentStatus;
-
-  @IsOptional()
-  @IsNumber()
-  amount?: number;
-
-  @IsOptional()
   @IsUUID()
-  providerId?: string;
+  id: string;
 
-  @IsString()
-  @IsOptional()
-  externalPaymentId?: string;
+  @IsUUID()
+  organizationId: string;
 
-  @IsString()
-  @IsOptional()
-  externalSessionId?: string;
-
-  @IsString()
-  @IsOptional()
-  providerMetadata?: Record<string, any>;
-
-  @IsString()
-  @IsOptional()
-  checkoutUrl?: string;
-
-  @IsString()
-  @IsOptional()
-  failureReason?: string;
-
-  @IsDate()
-  @IsOptional()
-  paidAt?: Date;
+  @IsUUID()
+  paymentMethodId: string;
+  
 }

@@ -2,7 +2,9 @@ import {
   ArrayMinSize,
   IsArray,
   IsNumber,
+  IsOptional,
   IsString,
+  IsUUID,
   ValidateNested,
 } from 'class-validator';
 import { PaymentProvider } from '../enums/payment-provider.enum';
@@ -37,6 +39,12 @@ export class LineItem {
 export class CreatePaymentSessionDto {
   @IsString()
   orderId: string;
+
+  // Supplied by the caller (client-gateway resolves it from Order.cashSessionId)
+  // — payments-ms does not resolve this itself, see the Payment entity comment.
+  @IsOptional()
+  @IsUUID()
+  cashSessionId?: string;
 
   @IsString()
   userId: string;
