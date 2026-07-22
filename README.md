@@ -1,474 +1,283 @@
-# 💳 Payments Microservice (`payments-ms`)
+<h1 align="center">💳 Payments Microservice · <code>payments-ms</code></h1>
 
-A NestJS microservice responsible for handling payments, subscriptions, Stripe Connect accounts, and access control in a multi-tenant environment.
+<p align="center">
+  <b>NestJS microservice</b> handling payments, subscriptions, Stripe Connect accounts and access control<br/>
+  in a multi-tenant environment. <i>The central payment platform for the entire ecosystem.</i>
+</p>
 
-The service communicates exclusively through RabbitMQ and integrates with Stripe for payment processing, subscription billing, and marketplace onboarding.
+<p align="center">
+  <img src="https://img.shields.io/badge/NestJS-11-E0234E?style=for-the-badge&logo=nestjs&logoColor=white" />
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
+  <img src="https://img.shields.io/badge/PostgreSQL-TypeORM%200.3-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" />
+  <img src="https://img.shields.io/badge/Stripe-Checkout%20%2B%20Connect-635BFF?style=for-the-badge&logo=stripe&logoColor=white" />
+  <img src="https://img.shields.io/badge/RabbitMQ-RPC%20%2B%20events-FF6600?style=for-the-badge&logo=rabbitmq&logoColor=white" />
+</p>
 
----
+<p align="center">
+  <img src="https://img.shields.io/badge/Transport-RabbitMQ%20only%20(no%20HTTP)-orange?style=flat-square" />
+  <img src="https://img.shields.io/badge/Queue-payments__queue-8A2BE2?style=flat-square" />
+  <img src="https://img.shields.io/badge/Redis-idempotency-DC382D?style=flat-square&logo=redis&logoColor=white" />
+  <img src="https://img.shields.io/badge/Multi--tenant-yes-2E7D32?style=flat-square" />
+</p>
 
-## 📋 Table of Contents
+<br/>
 
-* Overview
-* Architecture
-* Features
-* Tech Stack
-* Getting Started
-* Environment Variables
-* RabbitMQ Patterns
-* Stripe Integration
-* Database Entities
-* Dependencies
-* Development Notes
+## 🚀 Overview
 
----
+`payments-ms` manages customer payments, the subscription lifecycle, Stripe Checkout Sessions, Stripe Connect Express accounts, payment methods, access validation, webhook processing and payment analytics/reporting.
 
-# 🚀 Overview
+> [!IMPORTANT]
+> Designed as a **pure RabbitMQ microservice** — it does **not** expose any public REST API. It integrates with Stripe for payment processing, subscription billing and marketplace onboarding.
 
-`payments-ms` manages:
+<br/>
 
-* Customer payments
-* Subscription lifecycle
-* Stripe Checkout Sessions
-* Stripe Connect Express accounts
-* Payment methods
-* Access validation
-* Webhook processing
-* Payment analytics and reporting
+## 🏗️ Architecture
 
-The service is designed as a pure RabbitMQ microservice and does not expose any public REST API.
+```mermaid
+flowchart TB
+    GW["🌐 client-gateway"] -. "RabbitMQ RPC · payments_queue" .-> PAY
 
----
+    subgraph PAY["💳 payments-ms"]
+        direction LR
+        A["Payments"] ~~~ B["Subscriptions"] ~~~ C["Stripe Checkout"]
+        D["Stripe Connect"] ~~~ E["Webhook processing"] ~~~ F["Access control"]
+    end
 
-# 🏗️ Architecture
-
-```text
-                   ┌──────────────────┐
-                   │   Client Gateway │
-                   └────────┬─────────┘
-                            │ RabbitMQ
-                            ▼
-
-┌─────────────────────────────────────────────┐
-│                payments-ms                  │
-├─────────────────────────────────────────────┤
-│ Payments                                    │
-│ Subscriptions                               │
-│ Stripe Checkout                             │
-│ Stripe Connect                              │
-│ Webhook Processing                          │
-│ Access Control                              │
-└──────┬───────────────┬───────────────┬──────┘
-       │               │               │
-       ▼               ▼               ▼
- PostgreSQL         Redis         Stripe API
+    PAY --> PG[("🐘 PostgreSQL")]
+    PAY --> REDIS[("⚡ Redis · idempotency")]
+    PAY -. "API" .-> STRIPE[["💳 Stripe API"]]
 ```
 
----
+<br/>
 
-# ✨ Features
+## ✨ Features
 
-* Stripe Checkout integration
-* Subscription management
-* Stripe Connect Express onboarding
-* Payment tracking
-* POS payment methods
-* Access validation
-* RabbitMQ event-driven communication
-* Redis idempotency protection
-* Multi-tenant support
-* Cash-session reporting
-* Payment analytics
+Stripe Checkout integration · subscription management · Stripe Connect Express onboarding · payment tracking · POS payment methods · access validation · event-driven communication · Redis idempotency protection · multi-tenant support · cash-session reporting · payment analytics.
 
----
+<br/>
 
-# 🛠 Tech Stack
+## 🛠️ Tech Stack
 
-| Category       | Technology      |
-| -------------- | --------------- |
-| Framework      | NestJS 11       |
-| Language       | TypeScript 5    |
-| Database       | PostgreSQL      |
-| ORM            | TypeORM 0.3     |
-| Messaging      | RabbitMQ        |
-| Cache          | Redis           |
-| Payments       | Stripe          |
-| Validation     | class-validator |
-| Env Validation | Zod             |
-| Testing        | Jest            |
+| Category | Technology |
+|---|---|
+| Framework | NestJS 11 |
+| Language | TypeScript 5 |
+| Database | PostgreSQL |
+| ORM | TypeORM 0.3 |
+| Messaging | RabbitMQ |
+| Cache | Redis |
+| Payments | Stripe |
+| Validation | class-validator |
+| Environment validation | Zod |
+| Testing | Jest |
 
----
+<br/>
 
-# ⚙️ Getting Started
+## ⚙️ Getting Started
 
-## Prerequisites
-
-* Node.js 20+
-* PostgreSQL
-* RabbitMQ
-* Redis
-* Stripe Account
-
-## Installation
+**Prerequisites:** Node.js 20+, PostgreSQL, RabbitMQ, Redis, a Stripe account.
 
 ```bash
 npm install
-
 cp .env.example .env
-
 npm run start:dev
 ```
 
-## Available Scripts
+<details>
+<summary><b>📜 Available scripts</b></summary>
+
+<br/>
 
 ```bash
 npm run build
-npm run start
-npm run start:dev
-npm run start:prod
-npm run start:debug
-
+npm run start        # start / start:dev / start:debug / start:prod
 npm run lint
 npm run format
-
-npm run test
-npm run test:watch
-npm run test:cov
+npm run test         # test / test:watch / test:cov
 ```
 
----
+</details>
 
-# 🌍 Environment Variables
+<br/>
 
-| Variable                           | Required | Description                |
-| ---------------------------------- | -------- | -------------------------- |
-| NODE_ENV                           | ✅        | Environment                |
-| PORT                               | ❌        | Service port               |
-| DB_HOST                            | ✅        | PostgreSQL host            |
-| DB_PORT                            | ❌        | PostgreSQL port            |
-| POSTGRES_USER                      | ✅        | Database user              |
-| POSTGRES_PASSWORD                  | ✅        | Database password          |
-| POSTGRES_DB                        | ✅        | Database name              |
-| RABBITMQ_URL                       | ✅        | RabbitMQ connection string |
-| RABBITMQ_QUEUE                     | ✅        | RPC queue                  |
-| RABBITMQ_QUEUE_EVENTS_PAYMENTS     | ✅        | Events queue               |
-| RABBITMQ_QUEUE_EVENTS_ORDERS       | ✅        | Orders queue               |
-| RABBITMQ_QUEUE_EVENTS_ORGANIZATION | ✅        | Organization queue         |
-| CLIENT_URL                         | ✅        | Frontend URL               |
-| STRIPE_SECRET                      | ✅        | Stripe API key             |
-| STRIPE_PRICE_ID_BASIC              | ✅        | Basic plan price ID        |
-| STRIPE_PRICE_ID_PRO                | ✅        | Pro plan price ID          |
-| REDIS_HOST                         | ✅        | Redis host                 |
-| REDIS_PORT                         | ❌        | Redis port                 |
-| REDIS_PASS                         | ✅        | Redis password             |
+## 🌍 Environment Variables
 
----
+| Variable | Required | Description |
+|---|:---:|---|
+| `NODE_ENV` | ✅ | Environment |
+| `PORT` | ❌ | Service port |
+| `DB_HOST` | ✅ | PostgreSQL host |
+| `DB_PORT` | ❌ | PostgreSQL port |
+| `POSTGRES_USER` | ✅ | Database user |
+| `POSTGRES_PASSWORD` | ✅ | Database password |
+| `POSTGRES_DB` | ✅ | Database name |
+| `RABBITMQ_URL` | ✅ | RabbitMQ connection string |
+| `RABBITMQ_QUEUE` | ✅ | RPC queue |
+| `RABBITMQ_QUEUE_EVENTS_PAYMENTS` | ✅ | Events queue |
+| `RABBITMQ_QUEUE_EVENTS_ORDERS` | ✅ | Orders queue |
+| `RABBITMQ_QUEUE_EVENTS_ORGANIZATION` | ✅ | Organization queue |
+| `CLIENT_URL` | ✅ | Frontend URL |
+| `STRIPE_SECRET` | ✅ | Stripe API key |
+| `STRIPE_PRICE_ID_BASIC` | ✅ | Basic plan price ID |
+| `STRIPE_PRICE_ID_PRO` | ✅ | Pro plan price ID |
+| `REDIS_HOST` | ✅ | Redis host |
+| `REDIS_PORT` | ❌ | Redis port |
+| `REDIS_PASS` | ✅ | Redis password |
 
-# 📨 RabbitMQ Patterns
+<br/>
 
-## Payments
+## 📨 RabbitMQ Patterns
 
-| Pattern                        | Description             |
-| ------------------------------ | ----------------------- |
-| payment.session.create.payment | Create checkout session |
-| payment.create.payment         | Create payment          |
-| payment.find_all               | List payments           |
-| payment.find_my                | User payments           |
-| payment.get_by_id              | Get payment             |
-| payment.update                 | Update payment          |
-| payment.cancel                 | Cancel payment          |
-| payment.totals_by_method       | Totals by method        |
-| payment.totals_by_method_range | Totals by date range    |
+<details>
+<summary><b>💳 Payments patterns</b></summary>
 
----
+<br/>
 
-## Subscriptions
+| Pattern | Description |
+|---|---|
+| `payment.session.create.payment` | Create checkout session |
+| `payment.create.payment` | Create payment |
+| `payment.find_all` | List payments |
+| `payment.find_my` | User payments |
+| `payment.get_by_id` | Get payment |
+| `payment.update` | Update payment |
+| `payment.cancel` | Cancel payment |
+| `payment.totals_by_method` | Totals by method |
+| `payment.totals_by_method_range` | Totals by date range |
 
-| Pattern                                | Description         |
-| -------------------------------------- | ------------------- |
-| subscription.session.create.onboarding | Start onboarding    |
-| subscription.get_plans                 | Available plans     |
-| subscription.get_by_user               | User subscription   |
-| subscription.get_my_history            | Billing history     |
-| subscription.change_plan               | Change plan         |
-| subscription.cancel                    | Cancel subscription |
-| subscription.resume                    | Resume subscription |
+</details>
 
----
+<details>
+<summary><b>🔁 Subscriptions patterns</b></summary>
 
-## Payment Methods
+<br/>
 
-| Pattern                   | Description   |
-| ------------------------- | ------------- |
-| payment-method.create     | Create method |
-| payment-method.findAll    | List methods  |
-| payment-method.findOne    | Get method    |
-| payment-method.update     | Update method |
-| payment-method.softDelete | Soft delete   |
-| payment-method.restore    | Restore       |
+| Pattern | Description |
+|---|---|
+| `subscription.session.create.onboarding` | Start onboarding |
+| `subscription.get_plans` | Available plans |
+| `subscription.get_by_user` | User subscription |
+| `subscription.get_my_history` | Billing history |
+| `subscription.change_plan` | Change plan |
+| `subscription.cancel` | Cancel subscription |
+| `subscription.resume` | Resume subscription |
 
----
+</details>
 
-## Access Control
+<details>
+<summary><b>🏷️ Payment Methods patterns</b></summary>
 
-| Pattern                 | Description           |
-| ----------------------- | --------------------- |
-| access.check            | Subscription status   |
-| access.check_onboarding | Onboarding validation |
+<br/>
 
----
+| Pattern | Description |
+|---|---|
+| `payment-method.create` | Create method |
+| `payment-method.findAll` | List methods |
+| `payment-method.findOne` | Get method |
+| `payment-method.update` | Update method |
+| `payment-method.softDelete` | Soft delete |
+| `payment-method.restore` | Restore |
 
-## Stripe Connect
+</details>
 
-| Pattern                | Description                       |
-| ---------------------- | --------------------------------- |
-| stripe.connect.account | Create or recover Express account |
+<details>
+<summary><b>🔓 Access Control · Stripe Connect · Webhooks patterns</b></summary>
 
----
+<br/>
 
-## Webhooks
+| Pattern | Description |
+|---|---|
+| `access.check` | Subscription status |
+| `access.check_onboarding` | Onboarding validation |
+| `stripe.connect.account` | Create or recover Express account |
+| `payment.webhook` | Process Stripe events |
 
-| Pattern         | Description           |
-| --------------- | --------------------- |
-| payment.webhook | Process Stripe events |
+</details>
 
----
+<br/>
 
-# 💰 Stripe Integration
+## 💰 Stripe Integration
 
-## Supported Features
+**Supported features:** Checkout Sessions (one-time + subscription payments) · subscriptions (upgrade/downgrade/cancel/resume, invoice history) · Stripe Connect (Express accounts, onboarding links, account recovery, marketplace payments).
 
-### Checkout Sessions
-
-* One-time payments
-* Subscription payments
-
-### Subscriptions
-
-* Upgrade plans
-* Downgrade plans
-* Cancel subscriptions
-* Resume subscriptions
-* Invoice history
-
-### Stripe Connect
-
-* Express accounts
-* Onboarding links
-* Account recovery
-* Marketplace payments
-
----
-
-## Stripe Payment Flow
-
-```text
-Customer
-    │
-    ▼
-Checkout Session
-    │
-    ▼
-Stripe Payment
-    │
-    ▼
-Webhook Event
-    │
-    ▼
-payments-ms
-    │
-    ▼
-orders-ms
+```mermaid
+flowchart LR
+    C["🧑 Customer"] --> S["🧾 Checkout session"] --> P["💳 Stripe payment"] --> W["📡 Webhook event"] --> PAY["💳 payments-ms"] --> ORD["🧾 orders-ms"]
 ```
 
----
+<details>
+<summary><b>📡 Supported webhook events</b></summary>
 
-## Supported Webhook Events
+<br/>
 
-* checkout.session.completed
-* checkout.session.expired
-* invoice.paid
-* invoice.payment_failed
-* customer.subscription.updated
-* customer.subscription.deleted
-* payment_intent.succeeded
-* payment_intent.payment_failed
-* payment_intent.canceled
-* account.updated
-* account.application.deauthorized
+`checkout.session.completed` · `checkout.session.expired` · `invoice.paid` · `invoice.payment_failed` · `customer.subscription.updated` · `customer.subscription.deleted` · `payment_intent.succeeded` · `payment_intent.payment_failed` · `payment_intent.canceled` · `account.updated` · `account.application.deauthorized`
 
----
+</details>
 
-## Idempotency
+<details>
+<summary><b>🔒 Idempotency</b></summary>
 
-Webhook events are protected using Redis locks:
+<br/>
+
+Webhook events are protected using Redis locks, with a **72-hour TTL**:
 
 ```text
 stripe:evt:lock:<eventId>
 stripe:evt:done:<eventId>
 ```
 
-TTL: 72 hours
+</details>
 
----
+<br/>
 
-# 🗄 Database Entities
+## 🗄️ Database Entities
 
-## Payment
+<details>
+<summary><b>View all entities</b></summary>
 
-Represents a customer payment.
+<br/>
 
-Main fields:
+| Entity | Purpose | Main fields |
+|---|---|---|
+| **Payment** | A customer payment | `organizationId`, `orderId`, `subscriptionId`, `amount`, `currency`, `status`, `provider`, `externalPaymentId`, `externalSessionId`, `paidAt`, `cancelledAt` |
+| **Subscription** | A customer subscription (plans: `BASIC`, `PRO`) | `userId`, `plan`, `status`, `stripeSubscriptionId`, `currentPeriodStart`, `currentPeriodEnd`, `cancelAtPeriodEnd`, `priceAmount` |
+| **PaymentMethod** | A POS payment method (Cash, Card, Voucher, Gift Card…) | `organizationId`, `name`, `icon`, `isCash`, `isDefault`, `isSystem`, `isActive` |
 
-* organizationId
-* orderId
-* subscriptionId
-* amount
-* currency
-* status
-* provider
-* externalPaymentId
-* externalSessionId
-* paidAt
-* cancelledAt
+</details>
 
----
+<br/>
 
-## Subscription
+## 🔗 External Dependencies
 
-Represents a customer subscription.
+| Dependency | Usage |
+|---|---|
+| 🐘 **PostgreSQL** | Stores payments, subscriptions, payment methods |
+| 🐇 **RabbitMQ** | RPC + event-driven communication with orders-ms, organization-ms, auth-ms, client-gateway |
+| ⚡ **Redis** | Webhook idempotency + cache invalidation |
+| 💳 **Stripe** | Checkout Sessions, subscriptions, invoices, Stripe Connect |
 
-Main fields:
+<br/>
 
-* userId
-* plan
-* status
-* stripeSubscriptionId
-* currentPeriodStart
-* currentPeriodEnd
-* cancelAtPeriodEnd
-* priceAmount
+## ⚠️ Development Notes / Limitations
 
-Supported plans:
+> [!WARNING]
+> Tracked openly and worth verifying before production.
 
-* BASIC
-* PRO
+- **Refunds:** not implemented yet — the service marks payments as cancelled but does **not** call `stripe.refunds.create()`.
+- **PayPal:** not implemented — only Stripe is currently supported.
+- **Webhook gateway:** Stripe signature verification is performed **outside** this service; webhook events are received through RabbitMQ after validation by another service.
 
----
+<br/>
 
-## PaymentMethod
+## 📈 Service Scope
 
-Represents a POS payment method.
+`payments-ms` handles both sides of the platform:
 
-Examples:
+- **SaaS billing** — subscription plans, customer onboarding, access control.
+- **POS payments** — order payments, payment methods, cash reporting, payment analytics.
 
-* Cash
-* Card
-* Voucher
-* Gift Card
+This makes it the central payment platform for the entire ecosystem.
 
-Main fields:
-
-* organizationId
-* name
-* icon
-* isCash
-* isDefault
-* isSystem
-* isActive
-
----
-
-# 🔗 External Dependencies
-
-## PostgreSQL
-
-Stores:
-
-* Payments
-* Subscriptions
-* Payment Methods
-
----
-
-## RabbitMQ
-
-Handles:
-
-* RPC communication
-* Event-driven communication
-* Service integration
-
-Connected services:
-
-* orders-ms
-* organization-ms
-* auth-ms
-* client-gateway
-
----
-
-## Redis
-
-Used for:
-
-* Webhook idempotency
-* Cache invalidation
-
----
-
-## Stripe
-
-Used for:
-
-* Checkout Sessions
-* Subscriptions
-* Invoices
-* Stripe Connect
-
----
-
-# ⚠️ Development Notes
-
-## Current Limitations
-
-### Refunds
-
-Refund processing is not implemented yet.
-
-Current behavior:
-
-* Marks payments as cancelled
-* Does not call `stripe.refunds.create()`
-
-### PayPal
-
-PayPal provider is not implemented.
-
-Only Stripe is currently supported.
-
-### Webhook Gateway
-
-Stripe signature verification is performed outside this service.
-
-Webhook events are received through RabbitMQ after validation by another service.
-
----
-
-# 📈 Service Scope
-
-This service handles both:
-
-### SaaS Billing
-
-* Subscription plans
-* Customer onboarding
-* Access control
-
-### POS Payments
-
-* Order payments
-* Payment methods
-* Cash reporting
-* Payment analytics
-
-This makes `payments-ms` the central payment platform for the entire ecosystem.
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&height=80&section=footer" />
+</p>
